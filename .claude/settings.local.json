@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:github.com)",
+      "Bash(npx supabase:*)",
+      "Bash(npm run:*)",
+      "WebFetch(domain:www.ballersandbookworms.org)"
+    ]
+  }
+}
