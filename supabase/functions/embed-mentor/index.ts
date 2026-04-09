@@ -1,38 +1,42 @@
 /**
- * embed-mentor
+ * embed-mentor — Supabase Edge Function
  *
- * Called by a Postgres trigger (via pg_net) whenever a mentor's status
- * becomes 'active' or their bio changes while already active.
+ * Triggered by a Supabase Database Webhook on the `mentors` table
+ * (INSERT and UPDATE events). Generates a text embedding for any mentor
+ * whose status is 'active' and stores it in mentor_embeddings.
  *
- * What it does:
- *   1. Fetches the mentor's bio, sport, college, and mentorship areas
- *   2. Concatenates them into a single string
- *   3. Calls OpenAI text-embedding-3-small (outputs 1536 dims)
- *   4. Upserts the result into mentor_embeddings
+ * Environment variables (all injected automatically by Supabase):
+ *   SUPABASE_URL              — project API URL
+ *   SUPABASE_SERVICE_ROLE_KEY — bypasses RLS for internal reads/writes
  *
- * Required secrets (Supabase dashboard → Edge Functions → Secrets):
- *   OPENAI_API_KEY  — your OpenAI API key
+ * Secret to add in the Supabase dashboard → Edge Functions → Secrets:
+ *   OPENAI_API_KEY            — used to call text-embedding-3-small
  *
- * SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are injected automatically.
+ * Text embedded (concatenated):
+ *   - Bio
+ *   - Sport and college
+ *   - Mentorship areas grouped by category
  */
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
 Deno.serve(async (req: Request) => {
-  // Only accept POST
   if (req.method !== 'POST') {
     return json({ error: 'Method not allowed' }, 405)
   }
 
+  // Database Webhooks send { type, table, record, old_record, schema }
+  // We also accept a plain { mentor_id } for manual invocation.
   let mentor_id: string
   try {
-    ;({ mentor_id } = await req.json())
+    const body = await req.json()
+    mentor_id = body.record?.id ?? body.mentor_id
   } catch {
     return json({ error: 'Invalid JSON body' }, 400)
   }
 
   if (!mentor_id) {
-    return json({ error: 'mentor_id is required' }, 400)
+    return json({ error: 'Could not determine mentor_id from payload' }, 400)
   }
 
   const supabase = createClient(
@@ -41,7 +45,7 @@ Deno.serve(async (req: Request) => {
     { auth: { autoRefreshToken: false, persistSession: false } }
   )
 
-  // ── 1. Fetch mentor ───────────────────────────────────────────────────────
+  // ── 1. Fetch current mentor row ───────────────────────────────────────────
 
   const { data: mentor, error: mentorErr } = await supabase
     .from('mentors')
@@ -54,10 +58,9 @@ Deno.serve(async (req: Request) => {
     return json({ error: 'Mentor not found' }, 404)
   }
 
-  // Guard: skip if mentor is no longer active (status could have changed
-  // between the trigger firing and this function running)
+  // Only embed active mentors — webhook fires on all inserts/updates
   if (mentor.status !== 'active') {
-    console.log(`[embed-mentor] mentor ${mentor_id} is not active — skipping`)
+    console.log(`[embed-mentor] mentor ${mentor_id} status="${mentor.status}" — skipping`)
     return json({ skipped: true, reason: 'mentor not active' })
   }
 
@@ -77,7 +80,6 @@ Deno.serve(async (req: Request) => {
   if (mentor.college) parts.push(`College: ${mentor.college}`)
 
   if (areas && areas.length > 0) {
-    // Group areas by category for a cleaner representation
     const grouped = areas.reduce<Record<string, string[]>>((acc, { area, category }) => {
       if (!acc[category]) acc[category] = []
       acc[category].push(area)
@@ -137,7 +139,7 @@ Deno.serve(async (req: Request) => {
     return json({ error: upsertErr.message }, 500)
   }
 
-  console.log(`[embed-mentor] embedding stored for mentor ${mentor_id} (${embedding.length} dims)`)
+  console.log(`[embed-mentor] stored embedding for mentor ${mentor_id} (${embedding.length} dims)`)
   return json({ ok: true, mentor_id, dims: embedding.length })
 })
 
