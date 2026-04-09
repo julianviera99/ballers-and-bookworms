@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "seed": "node --env-file=.env scripts/seed-dev.js",
+    "seed:reset": "node --env-file=.env scripts/reset-dev.js && node --env-file=.env scripts/seed-dev.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.101.1",

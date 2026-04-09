@@ -28,14 +28,17 @@ A private web app for Ballers and Bookworms student athletes with two core featu
 
 ## Environment
 
-Copy `.env` and fill in values before running locally. The required variables are:
+`.env` (gitignored) must contain:
 
-- `VITE_SUPABASE_URL`
-- `VITE_SUPABASE_PUBLISHABLE_KEY`
+| Variable | Required for |
+|----------|-------------|
+| `VITE_SUPABASE_URL` | All environments |
+| `VITE_SUPABASE_PUBLISHABLE_KEY` | All environments |
+| `SUPABASE_SERVICE_ROLE_KEY` | Dev seed scripts only — never `VITE_` prefix |
+
+`SUPABASE_SERVICE_ROLE_KEY` is the service role key from the Supabase dashboard (Settings → API). It is only read by the Node seed scripts and is never exposed to the browser.
 
 ## Commands
-
-> To be filled in once `package.json` and build tooling are set up.
 
 | Task | Command |
 |------|---------|
@@ -43,4 +46,15 @@ Copy `.env` and fill in values before running locally. The required variables ar
 | Dev server | `npm run dev` |
 | Build | `npm run build` |
 | Lint | `npm run lint` |
-| Tests | `npm test` |
+| Seed dev data | `npm run seed` |
+| Reset + re-seed | `npm run seed:reset` |
+| Run migration | `npx supabase db query --linked -f supabase/migrations/<file>.sql` |
+
+## Dev tooling
+
+`src/dev/` contains dev-only code that Vite excludes from production builds:
+
+- **`personas.js`** — 3 athlete + 2 staff test personas with realistic funding request history
+- **`DevSwitcher.jsx`** — floating yellow "DEV" button (bottom-right) for instant persona switching
+
+After `npm run seed`, use the DEV button to switch between any persona — it calls `signInWithPassword` so the full Supabase session and RLS context are real. All test accounts use password `devpass123` and email domain `@bandb.test`.
