@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
+import { DEV_PERSONAS } from '../dev/personas'
 
 const FEATURES = [
   {
@@ -36,7 +37,9 @@ const FEATURES = [
 export default function Landing() {
   const { session, isStaff, loading } = useAuth()
   const navigate = useNavigate()
+  const [mode, setMode] = useState('github') // 'github' | 'dev'
   const [signingIn, setSigningIn] = useState(false)
+  const [switching, setSwitching] = useState(null) // email of persona being signed into
 
   useEffect(() => {
     if (loading) return
@@ -49,6 +52,20 @@ export default function Landing() {
       provider: 'github',
       options: { redirectTo: `${window.location.origin}/dashboard` },
     })
+  }
+
+  async function handlePersona(persona) {
+    if (switching) return
+    setSwitching(persona.email)
+    const { error } = await supabase.auth.signInWithPassword({
+      email: persona.email,
+      password: persona.password,
+    })
+    if (error) {
+      alert(`Sign-in failed: ${error.message}\n\nMake sure you've run: npm run seed`)
+      setSwitching(null)
+    }
+    // On success, the useEffect above handles the redirect
   }
 
   return (
@@ -86,23 +103,92 @@ export default function Landing() {
             </p>
           </div>
 
-          <div className="flex flex-col sm:flex-row items-center gap-3">
-            <button
-              onClick={handleSignIn}
-              disabled={signingIn}
-              className="inline-flex items-center gap-3 bg-brand hover:bg-brand-dark disabled:opacity-60 text-black font-bold px-8 py-4 rounded-xl transition-colors text-sm uppercase tracking-wide"
-            >
-              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                <path fillRule="evenodd" clipRule="evenodd" d="M12 2C6.477 2 2 6.477 2 12c0 4.418 2.865 8.166 6.839 9.489.5.092.682-.217.682-.482 0-.237-.009-.868-.013-1.703-2.782.604-3.369-1.342-3.369-1.342-.454-1.154-1.11-1.462-1.11-1.462-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.578 9.578 0 0 1 12 6.836a9.59 9.59 0 0 1 2.504.337c1.909-1.294 2.747-1.025 2.747-1.025.546 1.377.203 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.743 0 .267.18.578.688.48C19.138 20.163 22 16.418 22 12c0-5.523-4.477-10-10-10z" />
-              </svg>
-              {signingIn ? 'Redirecting…' : 'Sign in with GitHub'}
-            </button>
-            <Link
-              to="/mentor/apply"
-              className="inline-flex items-center gap-2 border border-white/20 hover:border-white/50 text-white/70 hover:text-white font-bold px-8 py-4 rounded-xl transition-colors text-sm uppercase tracking-wide"
-            >
-              Become a Mentor
-            </Link>
+          <div className="space-y-5">
+
+            {/* Mode toggle */}
+            <div className="inline-flex rounded-xl border border-white/15 p-1 gap-1">
+              <button
+                onClick={() => setMode('github')}
+                className={`px-5 py-2 rounded-lg text-xs font-bold uppercase tracking-wide transition-colors ${
+                  mode === 'github'
+                    ? 'bg-white text-black'
+                    : 'text-white/50 hover:text-white'
+                }`}
+              >
+                Sign in with GitHub
+              </button>
+              <button
+                onClick={() => setMode('dev')}
+                className={`px-5 py-2 rounded-lg text-xs font-bold uppercase tracking-wide transition-colors ${
+                  mode === 'dev'
+                    ? 'bg-brand text-black'
+                    : 'text-white/50 hover:text-white'
+                }`}
+              >
+                Dev Mode
+              </button>
+            </div>
+
+            {/* GitHub sign-in */}
+            {mode === 'github' && (
+              <div className="flex flex-col sm:flex-row items-center gap-3">
+                <button
+                  onClick={handleSignIn}
+                  disabled={signingIn}
+                  className="inline-flex items-center gap-3 bg-brand hover:bg-brand-dark disabled:opacity-60 text-black font-bold px-8 py-4 rounded-xl transition-colors text-sm uppercase tracking-wide"
+                >
+                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                    <path fillRule="evenodd" clipRule="evenodd" d="M12 2C6.477 2 2 6.477 2 12c0 4.418 2.865 8.166 6.839 9.489.5.092.682-.217.682-.482 0-.237-.009-.868-.013-1.703-2.782.604-3.369-1.342-3.369-1.342-.454-1.154-1.11-1.462-1.11-1.462-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.578 9.578 0 0 1 12 6.836a9.59 9.59 0 0 1 2.504.337c1.909-1.294 2.747-1.025 2.747-1.025.546 1.377.203 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.743 0 .267.18.578.688.48C19.138 20.163 22 16.418 22 12c0-5.523-4.477-10-10-10z" />
+                  </svg>
+                  {signingIn ? 'Redirecting…' : 'Sign in with GitHub'}
+                </button>
+                <Link
+                  to="/mentor/apply"
+                  className="inline-flex items-center gap-2 border border-white/20 hover:border-white/50 text-white/70 hover:text-white font-bold px-8 py-4 rounded-xl transition-colors text-sm uppercase tracking-wide"
+                >
+                  Become a Mentor
+                </Link>
+              </div>
+            )}
+
+            {/* Dev persona picker */}
+            {mode === 'dev' && (
+              <div className="w-full max-w-sm mx-auto space-y-2 text-left">
+                {DEV_PERSONAS.map(p => {
+                  const isLoading = switching === p.email
+                  const initials  = p.displayName.split(' ').map(n => n[0]).join('')
+                  return (
+                    <button
+                      key={p.email}
+                      onClick={() => handlePersona(p)}
+                      disabled={!!switching}
+                      className="w-full flex items-center gap-3 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/20 disabled:opacity-50 rounded-xl px-4 py-3 transition-colors"
+                    >
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${
+                        p.role === 'staff' ? 'bg-blue-500 text-white' : 'bg-brand text-black'
+                      }`}>
+                        {isLoading ? (
+                          <span className="animate-pulse">…</span>
+                        ) : initials}
+                      </div>
+                      <div className="text-left min-w-0">
+                        <p className="text-white text-sm font-semibold leading-tight">{p.displayName}</p>
+                        <p className="text-white/40 text-xs capitalize leading-tight">
+                          {p.role}{p.sports ? ` · ${p.sports[0]}` : ''}
+                        </p>
+                      </div>
+                      {!switching && (
+                        <span className="ml-auto text-white/30 text-xs flex-shrink-0">→</span>
+                      )}
+                    </button>
+                  )
+                })}
+                <p className="text-center text-white/25 text-[10px] pt-1">
+                  Run <code className="text-white/40">npm run seed</code> if sign-in fails
+                </p>
+              </div>
+            )}
+
           </div>
 
         </div>
