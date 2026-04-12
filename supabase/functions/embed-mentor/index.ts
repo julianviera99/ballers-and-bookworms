@@ -5,12 +5,14 @@
  * (INSERT and UPDATE events). Generates a text embedding for any mentor
  * whose status is 'active' and stores it in mentor_embeddings.
  *
- * Environment variables (all injected automatically by Supabase):
+ * Uses OpenAI text-embedding-3-small (1536 dims) — fast, always-warm API.
+ *
+ * Environment variables (auto-injected by Supabase):
  *   SUPABASE_URL              — project API URL
  *   SUPABASE_SERVICE_ROLE_KEY — bypasses RLS for internal reads/writes
  *
- * Secret to add in the Supabase dashboard → Edge Functions → Secrets:
- *   OPENAI_API_KEY            — used to call text-embedding-3-small
+ * Secrets (set in Supabase Dashboard → Edge Functions → Secrets):
+ *   OPENAI_API_KEY
  *
  * Text embedded (concatenated):
  *   - Bio
@@ -37,6 +39,11 @@ Deno.serve(async (req: Request) => {
 
   if (!mentor_id) {
     return json({ error: 'Could not determine mentor_id from payload' }, 400)
+  }
+
+  const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY')
+  if (!OPENAI_API_KEY) {
+    return json({ error: 'OPENAI_API_KEY is not configured' }, 500)
   }
 
   const supabase = createClient(
@@ -100,33 +107,30 @@ Deno.serve(async (req: Request) => {
     return json({ skipped: true, reason: 'no content to embed' })
   }
 
-  // ── 4. Generate embedding (OpenAI text-embedding-3-small, 1536 dims) ──────
+  // ── 4. Generate embedding via OpenAI text-embedding-3-small (1536 dims) ───
 
-  const openaiKey = Deno.env.get('OPENAI_API_KEY')
-  if (!openaiKey) {
-    console.error('[embed-mentor] OPENAI_API_KEY is not set')
-    return json({ error: 'OPENAI_API_KEY not configured' }, 500)
+  let embedding: number[]
+  try {
+    const res = await fetch('https://api.openai.com/v1/embeddings', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${OPENAI_API_KEY}`,
+        'Content-Type':  'application/json',
+      },
+      body: JSON.stringify({ model: 'text-embedding-3-small', input: text }),
+    })
+
+    if (!res.ok) {
+      const err = await res.text()
+      throw new Error(`OpenAI API ${res.status}: ${err}`)
+    }
+
+    const data = await res.json()
+    embedding = data.data[0].embedding
+  } catch (e) {
+    console.error('[embed-mentor] OpenAI embedding failed:', e)
+    return json({ error: `Embedding failed: ${(e as Error).message}` }, 500)
   }
-
-  const embeddingRes = await fetch('https://api.openai.com/v1/embeddings', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${openaiKey}`,
-      'Content-Type':  'application/json',
-    },
-    body: JSON.stringify({
-      model: 'text-embedding-3-small',
-      input: text,
-    }),
-  })
-
-  if (!embeddingRes.ok) {
-    const errText = await embeddingRes.text()
-    console.error('[embed-mentor] OpenAI error:', errText)
-    return json({ error: `OpenAI API error: ${embeddingRes.status}` }, 502)
-  }
-
-  const { data: [{ embedding }] } = await embeddingRes.json()
 
   // ── 5. Upsert into mentor_embeddings ─────────────────────────────────────
 

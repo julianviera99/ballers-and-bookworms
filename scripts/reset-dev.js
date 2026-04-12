@@ -8,6 +8,7 @@
 
 import { createClient } from '@supabase/supabase-js'
 import { DEV_PERSONAS }  from '../src/dev/personas.js'
+import { DEV_MENTORS }   from './mentor-data.js'
 
 const supabaseUrl    = process.env.VITE_SUPABASE_URL
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -24,7 +25,10 @@ const supabase = createClient(supabaseUrl, serviceRoleKey, {
 async function main() {
   console.log('\n🗑️  Resetting dev personas...\n')
 
-  const devEmails  = DEV_PERSONAS.map(p => p.email)
+  const devEmails   = [
+    ...DEV_PERSONAS.map(p => p.email),
+    ...DEV_MENTORS.map(m => m.email),
+  ]
   const staffEmails = DEV_PERSONAS.filter(p => p.role === 'staff').map(p => p.email)
 
   // 1. Remove staff_users entries for dev staff

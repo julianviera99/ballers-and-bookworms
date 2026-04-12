@@ -9,7 +9,10 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "seed": "node --env-file=.env scripts/seed-dev.js",
-    "seed:reset": "node --env-file=.env scripts/reset-dev.js && node --env-file=.env scripts/seed-dev.js"
+    "seed:mentors": "node --env-file=.env scripts/seed-mentors.js",
+    "embed:mentors": "node --env-file=.env scripts/embed-mentors.js",
+    "seed:all": "node --env-file=.env scripts/seed-dev.js && node --env-file=.env scripts/seed-mentors.js",
+    "seed:reset": "node --env-file=.env scripts/reset-dev.js && node --env-file=.env scripts/seed-dev.js && node --env-file=.env scripts/seed-mentors.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.101.1",
