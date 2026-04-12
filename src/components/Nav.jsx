@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
@@ -13,15 +13,40 @@ export default function Nav() {
     navigate('/', { replace: true })
   }
 
-  const links = isStaff
+  const linkGroups = isStaff
     ? [
-        { to: '/staff',          label: 'Pending Requests' },
-        { to: '/staff/athletes', label: 'All Athletes' },
+        {
+          label: null,
+          links: [
+            { to: '/staff',          label: 'Pending Requests' },
+            { to: '/staff/athletes', label: 'All Athletes' },
+          ],
+        },
+        {
+          label: 'Mentorship',
+          links: [
+            { to: '/staff/mentors/applications', label: 'Mentor Applications' },
+            { to: '/staff/mentors',              label: 'All Mentors' },
+            { to: '/staff/mentors/matches',      label: 'All Matches' },
+          ],
+        },
       ]
     : [
-        { to: '/dashboard',    label: 'Dashboard' },
-        { to: '/requests/new', label: 'New Request' },
-        { to: '/profile',      label: 'Profile' },
+        {
+          label: null,
+          links: [
+            { to: '/dashboard',    label: 'Dashboard' },
+            { to: '/requests/new', label: 'New Request' },
+            { to: '/profile',      label: 'Profile' },
+          ],
+        },
+        {
+          label: 'Mentorship',
+          links: [
+            { to: '/mentors/find',    label: 'Find a Mentor' },
+            { to: '/mentors/matches', label: 'My Matches' },
+          ],
+        },
       ]
 
   return (
@@ -30,23 +55,24 @@ export default function Nav() {
         <div className="flex items-center justify-between h-14">
 
           <Link to={isStaff ? '/staff' : '/dashboard'}>
-            <img
-              src="/brand/bandb_logo1.png"
-              alt="Ballers and Bookworms"
-              className="h-8 w-auto"
-            />
+            <img src="/brand/bandb_logo1.png" alt="Ballers and Bookworms" className="h-8 w-auto" />
           </Link>
 
           {/* Desktop links */}
-          <nav className="hidden sm:flex items-center gap-6">
-            {links.map(l => (
-              <Link
-                key={l.to}
-                to={l.to}
-                className="text-sm text-white/70 hover:text-white transition-colors"
-              >
-                {l.label}
-              </Link>
+          <nav className="hidden sm:flex items-center gap-5">
+            {linkGroups.map((group, gi) => (
+              <Fragment key={gi}>
+                {gi > 0 && <span className="w-px h-4 bg-white/20 flex-shrink-0" />}
+                {group.links.map(l => (
+                  <Link
+                    key={l.to}
+                    to={l.to}
+                    className="text-sm text-white/70 hover:text-white transition-colors whitespace-nowrap"
+                  >
+                    {l.label}
+                  </Link>
+                ))}
+              </Fragment>
             ))}
             <button
               onClick={handleSignOut}
@@ -78,15 +104,24 @@ export default function Nav() {
       {/* Mobile menu */}
       {open && (
         <div className="sm:hidden border-t border-white/10 bg-black px-4 py-2">
-          {links.map(l => (
-            <Link
-              key={l.to}
-              to={l.to}
-              onClick={() => setOpen(false)}
-              className="block py-3 text-sm text-white/70 hover:text-white border-b border-white/10 last:border-0"
-            >
-              {l.label}
-            </Link>
+          {linkGroups.map((group, gi) => (
+            <Fragment key={gi}>
+              {group.label && (
+                <p className="text-[10px] font-bold text-white/30 uppercase tracking-widest pt-4 pb-1">
+                  {group.label}
+                </p>
+              )}
+              {group.links.map(l => (
+                <Link
+                  key={l.to}
+                  to={l.to}
+                  onClick={() => setOpen(false)}
+                  className="block py-3 text-sm text-white/70 hover:text-white border-b border-white/10"
+                >
+                  {l.label}
+                </Link>
+              ))}
+            </Fragment>
           ))}
           <button
             onClick={handleSignOut}
