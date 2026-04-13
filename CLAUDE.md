@@ -49,6 +49,19 @@ A private web app for Ballers and Bookworms student athletes with two core featu
 | Seed dev data | `npm run seed` |
 | Reset + re-seed | `npm run seed:reset` |
 | Run migration | `npx supabase db query --linked -f supabase/migrations/<file>.sql` |
+| Deploy edge function | `npx supabase functions deploy <function-name>` |
+
+## Edge Functions
+
+All edge functions live in `supabase/functions/`. Each uses Deno and is deployed to Supabase. Auto-injected env vars: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_ANON_KEY`.
+
+| Function | Trigger | Purpose | Extra secrets needed |
+|----------|---------|---------|----------------------|
+| `embed-mentor` | Database Webhook (mentors INSERT/UPDATE) | Generates gte-small embedding for active mentors | none (uses built-in Supabase AI) |
+| `find-mentors` | POST from browser | Full AI matching pipeline (extract → filter → embed → vector search → explain) | `ANTHROPIC_API_KEY` |
+| `request-session` | POST from browser | Inserts session_request row + sends Resend email to mentor | `RESEND_API_KEY` (optional), `FROM_EMAIL` (optional) |
+
+Secrets are set in the Supabase dashboard → Edge Functions → Secrets. They are shared across all functions in the project.
 
 ## Dev tooling
 
