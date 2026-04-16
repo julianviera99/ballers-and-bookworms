@@ -1,12 +1,15 @@
 import { Fragment, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
 
 export default function Nav() {
   const { isStaff } = useAuth()
   const navigate = useNavigate()
+  const { pathname } = useLocation()
   const [open, setOpen] = useState(false)
+
+  const isHome = pathname === (isStaff ? '/staff' : '/dashboard')
 
   async function handleSignOut() {
     await supabase.auth.signOut()
@@ -54,9 +57,22 @@ export default function Nav() {
       <div className="max-w-5xl mx-auto px-4 sm:px-6">
         <div className="flex items-center justify-between h-14">
 
-          <Link to={isStaff ? '/staff' : '/dashboard'}>
-            <img src="/brand/bandb_logo1.png" alt="Ballers and Bookworms" className="h-8 w-auto" />
-          </Link>
+          <div className="flex items-center gap-1">
+            {!isHome && (
+              <button
+                onClick={() => navigate(-1)}
+                className="sm:hidden p-1.5 -ml-1.5 text-white/70 hover:text-white transition-colors"
+                aria-label="Go back"
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+                </svg>
+              </button>
+            )}
+            <Link to={isStaff ? '/staff' : '/dashboard'}>
+              <img src="/brand/bandb_logo1.png" alt="Ballers and Bookworms" className="h-8 w-auto" />
+            </Link>
+          </div>
 
           {/* Desktop links */}
           <nav className="hidden sm:flex items-center gap-5">
