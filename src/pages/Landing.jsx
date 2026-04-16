@@ -64,8 +64,9 @@ export default function Landing() {
     if (error) {
       alert(`Sign-in failed: ${error.message}\n\nMake sure you've run: npm run seed`)
       setSwitching(null)
+      return
     }
-    // On success, the useEffect above handles the redirect
+    window.location.replace(persona.role === 'staff' ? '/staff' : '/dashboard')
   }
 
   return (
