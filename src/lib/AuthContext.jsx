@@ -42,9 +42,13 @@ export function AuthProvider({ children }) {
     }
     init()
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session)
-      setIsStaff(session ? await checkStaff(session.user.id, session.user.email) : false)
+      if (session) {
+        checkStaff(session.user.id, session.user.email).then(setIsStaff)
+      } else {
+        setIsStaff(false)
+      }
     })
 
     return () => subscription.unsubscribe()
