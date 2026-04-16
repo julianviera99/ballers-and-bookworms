@@ -32,7 +32,7 @@ export default function DevSwitcher() {
   const currentEmail = session?.user?.email
 
   return (
-    <div style={{ fontFamily: 'monospace' }} className="fixed bottom-4 right-4 z-50">
+    <div style={{ fontFamily: 'monospace' }} className="fixed bottom-6 sm:bottom-4 right-4 z-50">
       {open ? (
         <div className="bg-gray-950 border border-gray-700 rounded-xl shadow-2xl w-64 overflow-hidden text-sm">
 
@@ -120,7 +120,7 @@ export default function DevSwitcher() {
       ) : (
         <button
           onClick={() => setOpen(true)}
-          className="bg-gray-950 border border-gray-700 text-yellow-400 text-[10px] font-bold uppercase tracking-widest px-2.5 py-1.5 rounded-lg shadow-lg hover:bg-gray-900 hover:border-gray-600 transition-colors"
+          className="bg-gray-950 border border-gray-700 text-yellow-400 text-xs sm:text-[10px] font-bold uppercase tracking-widest px-3 sm:px-2.5 py-2 sm:py-1.5 rounded-lg shadow-lg hover:bg-gray-900 hover:border-gray-600 transition-colors"
         >
           DEV
         </button>

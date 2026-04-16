@@ -106,17 +106,17 @@ function DashboardContent() {
             </span>
           </div>
           <div className="p-6">
-            <div className="grid grid-cols-3 gap-4 mb-5">
-              <div>
-                <p className="text-3xl font-bold text-black">${BUDGET.toLocaleString()}</p>
+            <div className="grid grid-cols-1 sm:grid-cols-3 divide-y sm:divide-y-0 divide-gray-100 mb-5">
+              <div className="pb-4 sm:pb-0 sm:pr-4">
+                <p className="text-2xl sm:text-3xl font-bold text-black">${BUDGET.toLocaleString()}</p>
                 <p className="text-xs text-gray-500 mt-0.5 uppercase tracking-wide">Total</p>
               </div>
-              <div>
-                <p className="text-3xl font-bold text-black">${remaining.toFixed(2)}</p>
+              <div className="py-4 sm:py-0 sm:px-4">
+                <p className="text-2xl sm:text-3xl font-bold text-black">${remaining.toFixed(2)}</p>
                 <p className="text-xs text-gray-500 mt-0.5 uppercase tracking-wide">Remaining</p>
               </div>
-              <div>
-                <p className="text-3xl font-bold text-gray-400">${used.toFixed(2)}</p>
+              <div className="pt-4 sm:pt-0 sm:pl-4">
+                <p className="text-2xl sm:text-3xl font-bold text-gray-400">${used.toFixed(2)}</p>
                 <p className="text-xs text-gray-500 mt-0.5 uppercase tracking-wide">Used</p>
               </div>
             </div>
@@ -145,42 +145,70 @@ function DashboardContent() {
               </Link>
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-gray-100 bg-gray-50 text-left">
-                    <th className="px-6 py-3 text-xs font-bold text-gray-500 uppercase tracking-wide">Date</th>
-                    <th className="px-6 py-3 text-xs font-bold text-gray-500 uppercase tracking-wide">Category</th>
-                    <th className="px-6 py-3 text-xs font-bold text-gray-500 uppercase tracking-wide hidden sm:table-cell">Description</th>
-                    <th className="px-6 py-3 text-xs font-bold text-gray-500 uppercase tracking-wide">Amount</th>
-                    <th className="px-6 py-3 text-xs font-bold text-gray-500 uppercase tracking-wide">Status</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-50">
-                  {requests.map(r => (
-                    <tr key={r.id} className="hover:bg-gray-50 transition-colors">
-                      <td className="px-6 py-3.5 text-gray-500 whitespace-nowrap">
-                        {new Date(r.created_at).toLocaleDateString()}
-                      </td>
-                      <td className="px-6 py-3.5 font-semibold text-black whitespace-nowrap">
+            <>
+              {/* Mobile: card layout */}
+              <div className="sm:hidden divide-y divide-gray-100">
+                {requests.map(r => (
+                  <div key={r.id} className="px-4 py-3 space-y-1.5">
+                    <div className="flex items-start justify-between gap-3">
+                      <span className="font-semibold text-black text-sm leading-tight">
                         {CATEGORY_LABELS[r.category] ?? r.category}
-                      </td>
-                      <td className="px-6 py-3.5 text-gray-500 max-w-xs truncate hidden sm:table-cell">
-                        {r.description}
-                      </td>
-                      <td className="px-6 py-3.5 font-bold text-black whitespace-nowrap">
+                      </span>
+                      <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold capitalize flex-shrink-0 ${STATUS_STYLES[r.status]}`}>
+                        {r.status}
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-500 leading-relaxed line-clamp-2">{r.description}</p>
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-gray-400">
+                        {new Date(r.created_at).toLocaleDateString()}
+                      </span>
+                      <span className="text-sm font-bold text-black">
                         ${Number(r.amount).toFixed(2)}
-                      </td>
-                      <td className="px-6 py-3.5 whitespace-nowrap">
-                        <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold capitalize ${STATUS_STYLES[r.status]}`}>
-                          {r.status}
-                        </span>
-                      </td>
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Desktop: table */}
+              <div className="hidden sm:block overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-gray-100 bg-gray-50 text-left">
+                      <th className="px-6 py-3 text-xs font-bold text-gray-500 uppercase tracking-wide">Date</th>
+                      <th className="px-6 py-3 text-xs font-bold text-gray-500 uppercase tracking-wide">Category</th>
+                      <th className="px-6 py-3 text-xs font-bold text-gray-500 uppercase tracking-wide">Description</th>
+                      <th className="px-6 py-3 text-xs font-bold text-gray-500 uppercase tracking-wide">Amount</th>
+                      <th className="px-6 py-3 text-xs font-bold text-gray-500 uppercase tracking-wide">Status</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {requests.map(r => (
+                      <tr key={r.id} className="hover:bg-gray-50 transition-colors">
+                        <td className="px-6 py-3.5 text-gray-500 whitespace-nowrap">
+                          {new Date(r.created_at).toLocaleDateString()}
+                        </td>
+                        <td className="px-6 py-3.5 font-semibold text-black whitespace-nowrap">
+                          {CATEGORY_LABELS[r.category] ?? r.category}
+                        </td>
+                        <td className="px-6 py-3.5 text-gray-500 max-w-xs truncate">
+                          {r.description}
+                        </td>
+                        <td className="px-6 py-3.5 font-bold text-black whitespace-nowrap">
+                          ${Number(r.amount).toFixed(2)}
+                        </td>
+                        <td className="px-6 py-3.5 whitespace-nowrap">
+                          <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold capitalize ${STATUS_STYLES[r.status]}`}>
+                            {r.status}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
           )}
         </div>
 
