@@ -8,8 +8,9 @@ import MentorApply from './pages/MentorApply'
 import Dashboard  from './pages/Dashboard'
 import Profile    from './pages/Profile'
 import NewRequest from './pages/NewRequest'
-import FindMentor from './pages/mentors/FindMentor'
-import MyMatches  from './pages/mentors/MyMatches'
+import FindMentor   from './pages/mentors/FindMentor'
+import MyMatches    from './pages/mentors/MyMatches'
+import Eligibility  from './pages/Eligibility'
 
 // Staff (StaffRoute inside each page)
 import StaffDashboard     from './pages/staff/StaffDashboard'
@@ -33,6 +34,7 @@ export default function App() {
         <Route path="/requests/new"    element={<NewRequest />} />
         <Route path="/mentors/find"    element={<FindMentor />} />
         <Route path="/mentors/matches" element={<MyMatches />} />
+        <Route path="/eligibility"     element={<Eligibility />} />
 
         {/* Staff */}
         <Route path="/staff"                       element={<StaffDashboard />} />
