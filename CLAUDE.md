@@ -8,6 +8,7 @@ A private web app for Ballers and Bookworms student athletes with two core featu
 
 1. **Fund Requests** — student athletes can request financial support across three categories: academic, athletic, and financial.
 2. **Mentor Matching** — connects student athletes with mentors.
+3. **NCAA Eligibility Checker** — processes transcripts via Claude vision, maps courses against the NCAA HS Portal approved list, and calculates DI/DII eligibility.
 
 ## Tech Stack
 
@@ -60,6 +61,8 @@ All edge functions live in `supabase/functions/`. Each uses Deno and is deployed
 | `embed-mentor` | Database Webhook (mentors INSERT/UPDATE) | Generates gte-small embedding for active mentors | none (uses built-in Supabase AI) |
 | `find-mentors` | POST from browser | Full AI matching pipeline (extract → filter → embed → vector search → explain) | `ANTHROPIC_API_KEY` |
 | `request-session` | POST from browser | Inserts session_request row + sends Resend email to mentor | `RESEND_API_KEY` (optional), `FROM_EMAIL` (optional) |
+| `scrape-ncaa-courses` | POST from browser | Scrapes NCAA HS Portal for a school's approved course list; caches 30 days in `ncaa_approved_courses_cache` | none |
+| `process-transcript` | POST from browser | Sends transcript (PDF/image) to Claude Haiku via vision/document API, maps courses against NCAA approved list, calculates core-course GPA, checks DI/DII requirements, saves to `eligibility_assessments` + `eligibility_courses` | `ANTHROPIC_API_KEY` |
 
 Secrets are set in the Supabase dashboard → Edge Functions → Secrets. They are shared across all functions in the project.
 
