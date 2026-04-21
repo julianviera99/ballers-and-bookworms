@@ -153,9 +153,10 @@ Deno.serve(async (req: Request) => {
     ncaa_school_code: knownCode,
     // extract_only: run Pass 1 only and return the school name (UI confirmation step)
     extract_only,
-    // school_name / school_state: skip Pass 1 when the caller already knows the school
+    // school_name / school_state / ceeb_code: skip Pass 1 when caller already knows the school
     school_name:  providedSchoolName,
     school_state: providedSchoolState,
+    ceeb_code:    providedCeebCode,
   } = body
 
   if (!athlete_id)     return json({ error: 'athlete_id is required' }, 400)
@@ -207,20 +208,22 @@ Deno.serve(async (req: Request) => {
 
   let extractedSchoolName: string
   let extractedSchoolState: string
+  let extractedCeebCode: string | null = null
 
   if (providedSchoolName?.trim() && providedSchoolState?.trim()) {
     // Caller already confirmed the school — skip Pass 1
     extractedSchoolName  = providedSchoolName.trim()
     extractedSchoolState = providedSchoolState.trim().toUpperCase()
-    console.log(`[process-transcript] Using provided school: "${extractedSchoolName}" (${extractedSchoolState})`)
+    extractedCeebCode    = providedCeebCode?.trim() || null
+    console.log(`[process-transcript] Using provided school: "${extractedSchoolName}" (${extractedSchoolState}) ceeb=${extractedCeebCode ?? 'none'}`)
   } else {
-    // Run Pass 1
+    // Run Pass 1 — extract school name, state, and CEEB code if visible
     try {
-      console.log('[process-transcript] Pass 1: extracting school name + state...')
+      console.log('[process-transcript] Pass 1: extracting school info...')
       const res = await claudeCall(
         ANTHROPIC_API_KEY,
         CLAUDE_TIMEOUT_QUICK,
-        'You are reading a high school transcript. Extract only the high school name and the US state (as a 2-letter code). Return valid JSON only with no prose: { "high_school_name": "...", "high_school_state": "XX" }',
+        'You are reading a high school transcript. Extract the high school name, the US state (2-letter code), and the CEEB code if visible (a 6-digit number printed near the school name, sometimes labeled "CEEB", "SAT Code", or "School Code"). Return valid JSON only with no prose: { "high_school_name": "...", "high_school_state": "XX", "ceeb_code": "123456" }. If no CEEB code is visible, set ceeb_code to null.',
         [contentBlock, { type: 'text', text: 'What high school issued this transcript? Return JSON only.' }],
         256,
       )
@@ -228,7 +231,8 @@ Deno.serve(async (req: Request) => {
       const schoolInfo = JSON.parse(cleaned)
       extractedSchoolName  = schoolInfo.high_school_name?.trim() ?? ''
       extractedSchoolState = schoolInfo.high_school_state?.trim().toUpperCase() ?? ''
-      console.log(`[process-transcript] Pass 1 result: "${extractedSchoolName}", "${extractedSchoolState}"`)
+      extractedCeebCode    = schoolInfo.ceeb_code?.trim() || null
+      console.log(`[process-transcript] Pass 1 result: "${extractedSchoolName}", "${extractedSchoolState}", ceeb=${extractedCeebCode ?? 'none'}`)
     } catch (e) {
       console.error(`[process-transcript] Pass 1 failed: ${(e as Error).message}`)
       return json({ error: `Failed to extract school from transcript: ${(e as Error).message}` }, 500)
@@ -241,7 +245,12 @@ Deno.serve(async (req: Request) => {
     // If the UI only wants the school name for confirmation, return early here
     if (extract_only === true || extract_only === 'true') {
       console.log('[process-transcript] extract_only=true — returning school info only')
-      return json({ status: 'school_extracted', high_school_name: extractedSchoolName, high_school_state: extractedSchoolState })
+      return json({
+        status:            'school_extracted',
+        high_school_name:  extractedSchoolName,
+        high_school_state: extractedSchoolState,
+        ceeb_code:         extractedCeebCode,
+      })
     }
   }
 
@@ -262,7 +271,8 @@ Deno.serve(async (req: Request) => {
       body: JSON.stringify({
         high_school_name: extractedSchoolName,
         state:            extractedSchoolState,
-        ...(knownCode ? { ncaa_school_code: knownCode } : {}),
+        ...(knownCode         ? { ncaa_school_code: knownCode }              : {}),
+        ...(extractedCeebCode ? { ceeb_code: extractedCeebCode }             : {}),
       }),
     })
 

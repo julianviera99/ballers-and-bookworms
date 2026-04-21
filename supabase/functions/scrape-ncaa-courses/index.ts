@@ -108,12 +108,12 @@ Deno.serve(async (req: Request) => {
   let body: Record<string, string>
   try { body = await req.json() } catch { return json({ error: 'Invalid JSON body' }, 400) }
 
-  const { high_school_name, state, ncaa_school_code } = body
+  const { high_school_name, state, ncaa_school_code, ceeb_code } = body
   if (!high_school_name?.trim()) return json({ error: 'high_school_name is required' }, 400)
   if (!state?.trim())            return json({ error: 'state is required' }, 400)
 
   const schoolState = state.trim().toUpperCase()
-  console.log(`[scrape-ncaa-courses] name="${high_school_name}", state="${schoolState}", code="${ncaa_school_code ?? 'none'}"`)
+  console.log(`[scrape-ncaa-courses] name="${high_school_name}", state="${schoolState}", code="${ncaa_school_code ?? 'none'}", ceeb="${ceeb_code ?? 'none'}"`)
 
   // ── Fast path: school code already known ──────────────────────────────
 
@@ -129,20 +129,18 @@ Deno.serve(async (req: Request) => {
 
   // ── Search NCAA portal ─────────────────────────────────────────────────
   // POST with form-urlencoded; the portal ignores GET query params.
+  // If a CEEB code is available, use it as the primary lookup — CEEB codes
+  // are globally unique and bypass the name-matching ambiguity entirely.
 
-  console.log(`[scrape-ncaa-courses] searching portal...`)
-
-  let searchHtml: string
-  try {
+  async function doSearch(params: Record<string, string>): Promise<string> {
     const formBody = new URLSearchParams({
       hsActionSubmit: 'Search',
-      name:           high_school_name.trim(),
-      state:          schoolState,
+      name:           params.name  ?? '',
+      state:          params.state ?? '',
       city:           '',
       hsCode:         '',
-      ceebCode:       '',
+      ceebCode:       params.ceebCode ?? '',
     }).toString()
-
     const ctl = new AbortController()
     const t   = setTimeout(() => ctl.abort(), SCRAPE_TIMEOUT)
     try {
@@ -153,19 +151,62 @@ Deno.serve(async (req: Request) => {
         body:    formBody,
       })
       if (!res.ok) throw new Error(`NCAA portal returned HTTP ${res.status}`)
-      searchHtml = await res.text()
+      return res.text()
     } finally {
       clearTimeout(t)
     }
-    console.log(`[scrape-ncaa-courses] search HTML: ${searchHtml.length} chars`)
-  } catch (e) {
-    const msg = (e as Error).message
-    console.error(`[scrape-ncaa-courses] search failed: ${msg}`)
-    return json({ status: 'not_found', fallback: true, error: msg })
   }
 
-  const schools = parseSearchResults(searchHtml)
-  console.log(`[scrape-ncaa-courses] parsed ${schools.length} school(s)`)
+  // Strip common school-name suffixes that the NCAA portal omits
+  // e.g. "Burlington Township High School" → "Burlington Township"
+  function stripSchoolSuffix(name: string): string {
+    return name
+      .replace(/\s+high\s+school$/i, '')
+      .replace(/\s+high\s+sch\.?$/i, '')
+      .replace(/\s+h\.?s\.?$/i, '')
+      .trim()
+  }
+
+  let schools: School[] = []
+
+  // 1. Try CEEB code first if available
+  if (ceeb_code?.trim()) {
+    console.log(`[scrape-ncaa-courses] trying CEEB code ${ceeb_code}...`)
+    try {
+      const html = await doSearch({ ceebCode: ceeb_code.trim() })
+      console.log(`[scrape-ncaa-courses] CEEB search HTML: ${html.length} chars`)
+      schools = parseSearchResults(html)
+      console.log(`[scrape-ncaa-courses] CEEB search parsed ${schools.length} school(s)`)
+    } catch (e) {
+      console.warn(`[scrape-ncaa-courses] CEEB search failed: ${(e as Error).message}, falling back to name search`)
+    }
+  }
+
+  // 2. Name+state search (with suffix-stripped retry)
+  if (schools.length === 0) {
+    const originalName = high_school_name.trim()
+    const strippedName = stripSchoolSuffix(originalName)
+    const searchNames  = originalName === strippedName
+      ? [originalName]
+      : [strippedName, originalName]   // try stripped first (portal uses short names)
+
+    for (const searchName of searchNames) {
+      if (schools.length > 0) break
+      console.log(`[scrape-ncaa-courses] searching portal for "${searchName}" (${schoolState})...`)
+      try {
+        const html = await doSearch({ name: searchName, state: schoolState })
+        console.log(`[scrape-ncaa-courses] name search HTML: ${html.length} chars`)
+        schools = parseSearchResults(html)
+        console.log(`[scrape-ncaa-courses] name search parsed ${schools.length} school(s)`)
+      } catch (e) {
+        const msg = (e as Error).message
+        console.error(`[scrape-ncaa-courses] search failed: ${msg}`)
+        return json({ status: 'not_found', fallback: true, error: msg })
+      }
+    }
+  }
+
+  console.log(`[scrape-ncaa-courses] final school count: ${schools.length}`)
 
   if (schools.length === 0) {
     return json({ status: 'not_found', fallback: true })
@@ -326,8 +367,10 @@ function parseSearchResults(html: string): School[] {
     const cells = row.querySelectorAll('td')
     if (cells.length < 5) continue
 
-    // The radio input inside the first cell carries the hsCode
-    const radio = cells[0].querySelector('input[type="radio"]')
+    // The radio input carries the hsCode. NCAA portal emits `type= "radio"`
+    // (note the space after =), which breaks attribute-exact selectors, so
+    // we match by name instead.
+    const radio = cells[0].querySelector('input[name="hsCode"]')
     const code  = radio?.getAttribute('value')?.trim()
     if (!code) continue
 

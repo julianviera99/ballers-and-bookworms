@@ -77,6 +77,7 @@ function EligibilityContent() {
   const [phase, setPhase]             = useState('idle')
   const [uploadedPath, setUploadedPath] = useState(null)
   const [extractedSchool, setExtractedSchool] = useState({ name: '', state: '' })
+  const [extractedCeebCode, setExtractedCeebCode] = useState(null)
   const [editSchool, setEditSchool]   = useState({ name: '', state: '' })
   const [editingSchool, setEditingSchool] = useState(false)
   const [schools, setSchools]         = useState([])   // multiple NCAA matches
@@ -183,6 +184,7 @@ function EligibilityContent() {
       const school = { name: data.high_school_name, state: data.high_school_state }
       setExtractedSchool(school)
       setEditSchool(school)
+      setExtractedCeebCode(data.ceeb_code ?? null)
       setPhase('confirming')
     } catch (e) {
       setError(`Could not read transcript: ${e.message}`)
@@ -203,7 +205,8 @@ function EligibilityContent() {
         school_name:    schoolName,
         school_state:   schoolState,
       }
-      if (ncaaCode) body.ncaa_school_code = ncaaCode
+      if (ncaaCode)          body.ncaa_school_code = ncaaCode
+      if (extractedCeebCode) body.ceeb_code = extractedCeebCode
 
       const res  = await callFn(body)
       const data = await res.json()
@@ -248,7 +251,7 @@ function EligibilityContent() {
   function reset() {
     setPhase('idle'); setUploadedPath(null); setExtractedSchool({ name: '', state: '' })
     setEditSchool({ name: '', state: '' }); setEditingSchool(false); setSchools([])
-    setResult(null); setError(null)
+    setResult(null); setError(null); setExtractedCeebCode(null)
   }
 
   // ── Derived result values ───────────────────────────────────────────────
