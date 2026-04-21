@@ -143,21 +143,19 @@ Deno.serve(async (req: Request) => {
 
   // ── Parse body ─────────────────────────────────────────────────────────
 
-  let body: Record<string, string>
+  // Use Record<string, unknown> so booleans (e.g. extract_only: true) are
+  // preserved with the correct runtime type instead of being coerced to string.
+  let body: Record<string, unknown>
   try { body = await req.json() } catch { return json({ error: 'Invalid JSON body' }, 400) }
 
-  const {
-    athlete_id,
-    storage_path,
-    storage_bucket,
-    ncaa_school_code: knownCode,
-    // extract_only: run Pass 1 only and return the school name (UI confirmation step)
-    extract_only,
-    // school_name / school_state / ceeb_code: skip Pass 1 when caller already knows the school
-    school_name:  providedSchoolName,
-    school_state: providedSchoolState,
-    ceeb_code:    providedCeebCode,
-  } = body
+  const athlete_id       = body.athlete_id       as string | undefined
+  const storage_path     = body.storage_path     as string | undefined
+  const storage_bucket   = body.storage_bucket   as string | undefined
+  const knownCode        = body.ncaa_school_code as string | undefined
+  const extract_only     = body.extract_only                            // boolean | string | undefined
+  const providedSchoolName  = body.school_name   as string | undefined
+  const providedSchoolState = body.school_state  as string | undefined
+  const providedCeebCode    = body.ceeb_code     as string | undefined
 
   if (!athlete_id)     return json({ error: 'athlete_id is required' }, 400)
   if (!storage_path)   return json({ error: 'storage_path is required' }, 400)
