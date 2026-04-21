@@ -44,6 +44,12 @@ export default function Nav() {
           ],
         },
         {
+          label: 'Eligibility',
+          links: [
+            { to: '/eligibility', label: 'NCAA Eligibility' },
+          ],
+        },
+        {
           label: 'Mentorship',
           links: [
             { to: '/mentors/find',    label: 'Find a Mentor' },

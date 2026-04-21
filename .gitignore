@@ -20,6 +20,12 @@ dist
 dist-ssr
 *.local
 
+# Local test transcripts — never commit (contains anonymized student data)
+test_transcripts/
+
+# Supabase CLI temp files
+supabase/.temp/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
