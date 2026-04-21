@@ -327,7 +327,13 @@ Mapping rules:
 5. needs_review=true if the match is uncertain OR if the grade/credit is illegible OR if the course is in-progress (no final grade yet).
 6. credit: use the value shown on the transcript. If not shown, infer 1.0 for year-long, 0.5 for semester.
 7. grade: normalize to A, A-, B+, B, B-, C+, C, C-, D+, D, D-, F. In-progress courses with no grade: use "In Progress".
-8. semester: capture the grade level and term if shown (e.g. "9th Grade", "10th Grade Fall").
+8. semester: return the grade level as "9th Grade", "10th Grade", "11th Grade", or "12th Grade".
+   If the transcript shows school years (e.g. "22-23") rather than grade levels, convert them:
+   use the student's current grade as the anchor for the most recent completed year, then count back.
+   For example, if the student is currently in 12th grade and "25-26" is the current year,
+   then "24-25" = 11th Grade, "23-24" = 10th Grade, "22-23" = 9th Grade.
+   If the term (fall/spring) is also shown, append it: "10th Grade Fall".
+   If the grade level cannot be determined, return null.
 
 Always respond with valid JSON only — no prose, no markdown fences.`
 
@@ -528,6 +534,7 @@ Extract all courses from this transcript and return this exact JSON shape:
         is_approved:     c.is_approved,
         confidence:      c.confidence,
         needs_review:    c.needs_review,
+        semester:        c.semester ?? null,
       })))
 
     if (coursesErr) {
