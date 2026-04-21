@@ -243,8 +243,12 @@ function EligibilityContent() {
   function callFn(body) {
     return fetch(`${SUPABASE_URL}/functions/v1/process-transcript`, {
       method:  'POST',
-      headers: { 'Authorization': `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
-      body:    JSON.stringify(body),
+      headers: {
+        'Authorization': `Bearer ${session.access_token}`,
+        'apikey':        import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+        'Content-Type':  'application/json',
+      },
+      body: JSON.stringify(body),
     })
   }
 
