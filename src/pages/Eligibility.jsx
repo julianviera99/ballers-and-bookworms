@@ -585,7 +585,8 @@ function EligibilityContent() {
             { label: 'Other Academic Courses',                                courses: otherCourses,              req: 4        },
           ]
 
-          const needsReviewCourses = result.courses.filter(c => c.needs_review)
+          const inProgressCourses  = result.courses.filter(c => c.is_approved && c.grade === 'In Progress')
+          const needsReviewCourses = result.courses.filter(c => c.needs_review && !(c.is_approved && c.grade === 'In Progress'))
           const notApprovedCourses = result.courses.filter(c => !c.is_approved && c.mapped_category !== 'Non-Core')
 
           return (
@@ -687,13 +688,16 @@ function EligibilityContent() {
                       {courses.length > 0 ? (
                         <>
                           {courses.map((c, i) => (
-                            <div key={i} className={`px-5 py-2.5 border-b border-gray-50 last:border-0 ${c.needs_review ? 'bg-yellow-50' : 'hover:bg-gray-50'}`}>
+                            <div key={i} className={`px-5 py-2.5 border-b border-gray-50 last:border-0 ${c.is_approved && c.grade === 'In Progress' ? 'bg-blue-50' : c.needs_review ? 'bg-yellow-50' : 'hover:bg-gray-50'}`}>
                               {/* Mobile */}
                               <div className="flex items-start gap-3 sm:hidden">
                                 <div className="flex-1 min-w-0">
                                   <div className="flex flex-wrap items-baseline gap-x-2">
                                     <span className="text-sm font-medium text-black leading-snug">{c.course_name}</span>
-                                    {c.needs_review && <span className="text-[9px] font-bold bg-yellow-300 text-black px-1.5 py-0.5 rounded uppercase">Review</span>}
+                                    {c.is_approved && c.grade === 'In Progress'
+                                    ? <span className="text-[9px] font-bold bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded uppercase tracking-wide">In Progress</span>
+                                    : c.needs_review && <span className="text-[9px] font-bold bg-yellow-300 text-black px-1.5 py-0.5 rounded uppercase tracking-wide">Review</span>
+                                  }
                                   </div>
                                   {c.semester && <p className="text-[10px] text-gray-400 mt-0.5">{c.semester}</p>}
                                 </div>
@@ -709,7 +713,10 @@ function EligibilityContent() {
                                 <div className="flex-1 min-w-0 pr-3">
                                   <div className="flex flex-wrap items-baseline gap-x-2">
                                     <span className="text-sm font-medium text-black">{c.course_name}</span>
-                                    {c.needs_review && <span className="text-[9px] font-bold bg-yellow-300 text-black px-1.5 py-0.5 rounded uppercase">Review</span>}
+                                    {c.is_approved && c.grade === 'In Progress'
+                                    ? <span className="text-[9px] font-bold bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded uppercase tracking-wide">In Progress</span>
+                                    : c.needs_review && <span className="text-[9px] font-bold bg-yellow-300 text-black px-1.5 py-0.5 rounded uppercase tracking-wide">Review</span>
+                                  }
                                   </div>
                                 </div>
                                 <span className="w-28 text-xs text-gray-500 text-center flex-shrink-0">{c.semester ?? ''}</span>
@@ -760,6 +767,33 @@ function EligibilityContent() {
                   <StatusBadge status={divStatusKey} />
                 </div>
               </div>
+
+              {/* In-progress courses note */}
+              {inProgressCourses.length > 0 && (
+                <div className="flex gap-3 bg-blue-50 border border-blue-200 rounded-xl px-4 py-3">
+                  <svg className="w-4 h-4 flex-shrink-0 mt-0.5 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <div className="text-xs text-blue-800 leading-relaxed">
+                    <p className="font-bold mb-1">
+                      {inProgressCourses.length} approved course{inProgressCourses.length > 1 ? 's are' : ' is'} still in progress
+                    </p>
+                    <p className="mb-1.5">
+                      These courses are on your school's NCAA-approved list but don't have a final grade yet.
+                      They will count toward your core-course GPA and credit totals once grades are posted.
+                    </p>
+                    <ul className="space-y-0.5">
+                      {inProgressCourses.map((c, i) => (
+                        <li key={i} className="flex items-baseline gap-1.5">
+                          <span className="w-1 h-1 rounded-full bg-blue-400 flex-shrink-0 mt-1.5" />
+                          <span className="font-medium">{c.course_name}</span>
+                          <span className="text-blue-600">({CAT_SHORT[c.mapped_category] ?? c.mapped_category})</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              )}
 
               {/* DI — 10/7 Rule */}
               {isDI && (
@@ -837,8 +871,6 @@ function EligibilityContent() {
                         ? 'Medium confidence in category — confirm this matches your school\'s approved course list'
                         : !c.is_approved
                         ? 'Not found on the school\'s NCAA-approved list — may still qualify; verify with the Eligibility Center'
-                        : c.grade === 'In Progress'
-                        ? 'Course is in progress — will count toward eligibility once a final grade is posted'
                         : 'Grade or credit appears illegible on the transcript — manual verification recommended'
                       return (
                         <li key={i} className="pl-3 border-l-2 border-yellow-300 space-y-0.5">
