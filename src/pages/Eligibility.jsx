@@ -553,24 +553,27 @@ function EligibilityContent() {
             ? (di.status === 'at_risk_10_7_rule' ? 'at_risk' : di.eligible ? 'on_track' : 'needs_attention')
             : (dii.eligible ? 'on_track' : 'needs_attention')
 
-          // Partition approved courses so each appears in exactly one worksheet section
+          // Partition approved courses so each appears in exactly one worksheet section.
+          // Every category is capped at its minimum — all overflow flows to Other Academic Courses.
           const engAll     = approvedCourses.filter(c => c.mapped_category === 'English')
           const mathAll    = approvedCourses.filter(c => c.mapped_category === 'Mathematics')
           const sciAll     = approvedCourses.filter(c => c.mapped_category === 'Natural/Physical Science')
-          const ssCourses  = approvedCourses.filter(c => c.mapped_category === 'Social Science')
-          const flCourses  = approvedCourses.filter(c => c.mapped_category === 'Foreign Language/Comparative Religion and Philosophy')
+          const ssAll      = approvedCourses.filter(c => c.mapped_category === 'Social Science')
+          const flAll      = approvedCourses.filter(c => c.mapped_category === 'Foreign Language/Comparative Religion and Philosophy')
           const addCourses = approvedCourses.filter(c => c.mapped_category === 'Additional Academic')
 
           const engReq   = isDI ? 4 : 3
           const mathReq  = isDI ? 3 : 2
           const sciReq   = 2
           const extraReq = isDI ? 1 : 3
+          const ssReq    = 2
 
           // EMS overflow = courses in English/Math/Science beyond subject-specific minimums
           const emsOverflow  = [...engAll.slice(engReq), ...mathAll.slice(mathReq), ...sciAll.slice(sciReq)]
           const extraCourses = emsOverflow.slice(0, extraReq)
-          // Other Academic = FL + Additional Academic + any EMS overflow beyond the extra slot
-          const otherCourses = [...flCourses, ...addCourses, ...emsOverflow.slice(extraReq)]
+          const ssOverflow   = ssAll.slice(ssReq)
+          // Other Academic = FL + Additional Academic + excess EMS beyond the extra slot + SS overflow
+          const otherCourses = [...flAll, ...addCourses, ...emsOverflow.slice(extraReq), ...ssOverflow]
 
           const SECTIONS = [
             { label: 'English',                                               courses: engAll.slice(0, engReq),   req: engReq   },
@@ -578,7 +581,7 @@ function EligibilityContent() {
             { label: 'Natural/Physical Science',                              courses: sciAll.slice(0, sciReq),  req: sciReq   },
             { label: isDI ? 'Extra Year — English, Math, or Science'
                           : 'Extra Years — English, Math, or Science',        courses: extraCourses,              req: extraReq },
-            { label: 'Social Science',                                        courses: ssCourses,                 req: 2        },
+            { label: 'Social Science',                                        courses: ssAll.slice(0, ssReq),     req: ssReq    },
             { label: 'Other Academic Courses',                                courses: otherCourses,              req: 4        },
           ]
 
@@ -826,16 +829,27 @@ function EligibilityContent() {
                   <p className="text-xs text-yellow-700 leading-relaxed">
                     These courses were mapped with lower confidence. Verify they appear on your school's official NCAA-approved course list before relying on this estimate.
                   </p>
-                  <ul className="space-y-1.5">
-                    {needsReviewCourses.map((c, i) => (
-                      <li key={i} className="flex items-start gap-2 text-sm text-yellow-800">
-                        <span className="w-1 h-1 rounded-full bg-yellow-600 flex-shrink-0 mt-2" />
-                        <span>
-                          <span className="font-medium">{c.course_name}</span>{' '}
-                          <span className="text-yellow-600 text-xs">({CAT_SHORT[c.mapped_category] ?? c.mapped_category})</span>
-                        </span>
-                      </li>
-                    ))}
+                  <ul className="space-y-3">
+                    {needsReviewCourses.map((c, i) => {
+                      const reason = c.confidence === 'low'
+                        ? 'Low confidence in subject category — course name is ambiguous or unusual'
+                        : c.confidence === 'medium'
+                        ? 'Medium confidence in category — confirm this matches your school\'s approved course list'
+                        : !c.is_approved
+                        ? 'Not found on the school\'s NCAA-approved list — may still qualify; verify with the Eligibility Center'
+                        : c.grade === 'In Progress'
+                        ? 'Course is in progress — will count toward eligibility once a final grade is posted'
+                        : 'Grade or credit appears illegible on the transcript — manual verification recommended'
+                      return (
+                        <li key={i} className="pl-3 border-l-2 border-yellow-300 space-y-0.5">
+                          <div className="flex items-baseline gap-2 flex-wrap">
+                            <span className="text-sm font-medium text-yellow-900">{c.course_name}</span>
+                            <span className="text-yellow-600 text-xs">({CAT_SHORT[c.mapped_category] ?? c.mapped_category})</span>
+                          </div>
+                          <p className="text-xs text-yellow-700">{reason}</p>
+                        </li>
+                      )
+                    })}
                   </ul>
                 </div>
               )}
