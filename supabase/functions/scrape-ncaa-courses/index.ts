@@ -17,9 +17,17 @@
  * Written only via service_role — no extra secrets required beyond the
  * auto-injected SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, SUPABASE_ANON_KEY.
  *
- * NCAA Portal API (all POST, application/x-www-form-urlencoded):
- *   Search:  hsActionSubmit=Search&name=<name>&state=<state>&city=&hsCode=&ceebCode=
- *   Courses: hsActionSubmit=Get+High+School+Core+Courses&hsCode=<code>
+ * NCAA Portal flow (discovered by inspecting live browser traffic):
+ *   1. GET  https://web3.ncaa.org/hsportal/exec/hsAction?hsActionSubmit=searchHighSchool
+ *           → establishes JSESSIONID session cookie; returns the search form page
+ *   2. POST https://web3.ncaa.org/hsportal/exec/hsAction  (no query string)
+ *           body: hsActionSubmit=Search&ceebCode=<code>   (or name=<n>&state=<s>)
+ *           → if CEEB uniquely identifies the school: returns course list directly
+ *             (approvedCourseTable_1..5 present in response)
+ *           → if name search: returns #selectHsFormTable with matching schools
+ *   3. POST https://web3.ncaa.org/hsportal/exec/hsAction  (name-search path only)
+ *           body: hsActionSubmit=Get High School Core Courses&hsCode=<6-digit-code>
+ *           → returns course list (approvedCourseTable_1..5)
  */
 
 import { parse as parseHtml } from 'https://esm.sh/node-html-parser@6'
@@ -33,19 +41,31 @@ const CORS = {
   'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
 }
 
-const NCAA_BASE        = 'https://web3.ncaa.org/hsportal/exec/hsAction'
+// GET this URL to establish a JSESSIONID session cookie before searching
+const NCAA_SESSION_URL = 'https://web3.ncaa.org/hsportal/exec/hsAction?hsActionSubmit=searchHighSchool'
+// All POST actions go to this base URL (action is specified in the POST body)
+const NCAA_ACTION_URL  = 'https://web3.ncaa.org/hsportal/exec/hsAction'
+
 const CACHE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000   // 30 days
 const SCRAPE_TIMEOUT   = 20_000                        // 20 s per outbound fetch
 
-const SCRAPE_HEADERS = {
-  'User-Agent':   'Mozilla/5.0 (compatible; BallersBookworms-Eligibility/1.0)',
-  'Accept':       'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+const BROWSER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+
+const BASE_HEADERS = {
+  'User-Agent':      BROWSER_UA,
+  'Accept':          'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+  'Accept-Language': 'en-US,en;q=0.9',
+  'Accept-Encoding': 'gzip, deflate, br',
+}
+
+const POST_HEADERS = {
+  ...BASE_HEADERS,
   'Content-Type': 'application/x-www-form-urlencoded',
+  'Referer':      NCAA_SESSION_URL,
+  'Origin':       'https://web3.ncaa.org',
 }
 
 // NCAA category numbers → standard labels
-// (portal uses 1=English, 2=Social Science, 3=Mathematics,
-//  4=Natural/Physical Science, 5=World Language/Comp Religion & Philosophy)
 const CATEGORY_BY_NUM: Record<string, string> = {
   '1': 'English',
   '2': 'Social Science',
@@ -91,14 +111,12 @@ Deno.serve(async (req: Request) => {
   const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
   const SUPABASE_ANON_KEY         = Deno.env.get('SUPABASE_ANON_KEY')!
 
-  // Verify the caller is a logged-in user
   const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     global: { headers: { Authorization: authHeader } },
   })
   const { data: { user }, error: authErr } = await userClient.auth.getUser()
   if (authErr || !user) return json({ error: 'Unauthorized' }, 401)
 
-  // Service-role client for cache reads/writes (bypasses RLS)
   const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
     auth: { autoRefreshToken: false, persistSession: false },
   })
@@ -113,7 +131,43 @@ Deno.serve(async (req: Request) => {
   if (!state?.trim())            return json({ error: 'state is required' }, 400)
 
   const schoolState = state.trim().toUpperCase()
-  console.log(`[scrape-ncaa-courses] name="${high_school_name}", state="${schoolState}", code="${ncaa_school_code ?? 'none'}", ceeb="${ceeb_code ?? 'none'}"`)
+  // Normalise to string — Claude occasionally returns the CEEB code as a number
+  const ceebCodeStr = ceeb_code != null ? String(ceeb_code).trim() : ''
+  console.log(`[scrape-ncaa-courses] name="${high_school_name}", state="${schoolState}", code="${ncaa_school_code ?? 'none'}", ceeb="${ceebCodeStr || 'none'}"`)
+
+  // ── Establish browser session ──────────────────────────────────────────
+  // GET the search form page to get a JSESSIONID that the portal will accept
+  // on subsequent POST requests. GETting the homepage is not sufficient —
+  // the search form page sets its own session context.
+  let sessionCookie = ''
+  try {
+    const ctl = new AbortController()
+    const t   = setTimeout(() => ctl.abort(), SCRAPE_TIMEOUT)
+    try {
+      const res = await fetch(NCAA_SESSION_URL, {
+        method:   'GET',
+        signal:   ctl.signal,
+        headers:  BASE_HEADERS,
+        redirect: 'follow',
+      })
+      const raw = res.headers.get('set-cookie') ?? ''
+      if (raw) {
+        // Deno collapses multiple Set-Cookie headers into one comma-joined string
+        sessionCookie = raw
+          .split(/,(?=[^;]+=[^;])/)
+          .map(c => c.split(';')[0].trim())
+          .filter(Boolean)
+          .join('; ')
+        console.log(`[scrape-ncaa-courses] session established, cookie length=${sessionCookie.length}`)
+      } else {
+        console.warn('[scrape-ncaa-courses] no Set-Cookie from search form — portal may reject search')
+      }
+    } finally {
+      clearTimeout(t)
+    }
+  } catch (e) {
+    console.warn(`[scrape-ncaa-courses] session GET failed: ${(e as Error).message}`)
+  }
 
   // ── Fast path: school code already known ──────────────────────────────
 
@@ -124,30 +178,33 @@ Deno.serve(async (req: Request) => {
       console.log(`[scrape-ncaa-courses] cache hit for ${code}`)
       return json({ status: 'found', ...cached, from_cache: true })
     }
-    return scrapeSchool(admin, code, high_school_name.trim(), schoolState)
+    return scrapeSchool(admin, code, high_school_name.trim(), schoolState, sessionCookie)
   }
 
   // ── Search NCAA portal ─────────────────────────────────────────────────
-  // POST with form-urlencoded; the portal ignores GET query params.
-  // If a CEEB code is available, use it as the primary lookup — CEEB codes
-  // are globally unique and bypass the name-matching ambiguity entirely.
+  // The search form's submit button has name="hsActionSubmit" value="Search".
+  // That value must appear in the POST body — putting it in the URL query
+  // string only navigates to the form, it does not process a search.
 
   async function doSearch(params: Record<string, string>): Promise<string> {
     const formBody = new URLSearchParams({
       hsActionSubmit: 'Search',
-      name:           params.name  ?? '',
-      state:          params.state ?? '',
+      name:           params.name     ?? '',
+      state:          params.state    ?? '',
       city:           '',
       hsCode:         '',
       ceebCode:       params.ceebCode ?? '',
     }).toString()
+    const headers: Record<string, string> = { ...POST_HEADERS }
+    if (sessionCookie) headers['Cookie'] = sessionCookie
+    console.log(`[DIAG] search body: ${formBody}`)
     const ctl = new AbortController()
     const t   = setTimeout(() => ctl.abort(), SCRAPE_TIMEOUT)
     try {
-      const res = await fetch(NCAA_BASE, {
+      const res = await fetch(NCAA_ACTION_URL, {
         method:  'POST',
         signal:  ctl.signal,
-        headers: SCRAPE_HEADERS,
+        headers,
         body:    formBody,
       })
       if (!res.ok) throw new Error(`NCAA portal returned HTTP ${res.status}`)
@@ -158,7 +215,6 @@ Deno.serve(async (req: Request) => {
   }
 
   // Strip common school-name suffixes that the NCAA portal omits
-  // e.g. "Burlington Township High School" → "Burlington Township"
   function stripSchoolSuffix(name: string): string {
     return name
       .replace(/\s+high\s+school$/i, '')
@@ -167,58 +223,56 @@ Deno.serve(async (req: Request) => {
       .trim()
   }
 
-  let schools: School[] = []
-
-  // 1. Try CEEB code first if available
-  if (ceeb_code?.trim()) {
-    console.log(`[scrape-ncaa-courses] trying CEEB code ${ceeb_code}...`)
+  // 1. Try CEEB code first — globally unique, and when it matches exactly one
+  //    school the portal returns the course list directly (no select-school step).
+  if (ceebCodeStr) {
+    console.log(`[scrape-ncaa-courses] searching by CEEB code ${ceebCodeStr}...`)
     try {
-      const html = await doSearch({ ceebCode: ceeb_code.trim() })
-      console.log(`[scrape-ncaa-courses] CEEB search HTML: ${html.length} chars`)
-      schools = parseSearchResults(html)
-      console.log(`[scrape-ncaa-courses] CEEB search parsed ${schools.length} school(s)`)
+      const html    = await doSearch({ ceebCode: ceebCodeStr })
+      const courses = parseCourseList(html)
+      if (courses.length > 0) {
+        // Portal resolved the CEEB to one school and returned its course list directly
+        console.log(`[scrape-ncaa-courses] CEEB search returned ${courses.length} courses directly`)
+        return cacheAndReturn(admin, null, high_school_name.trim(), schoolState, courses)
+      }
+      // If no course tables, fall through — may have returned #selectHsFormTable
+      console.log('[scrape-ncaa-courses] CEEB search returned no course tables; falling back to name search')
     } catch (e) {
-      console.warn(`[scrape-ncaa-courses] CEEB search failed: ${(e as Error).message}, falling back to name search`)
+      console.warn(`[scrape-ncaa-courses] CEEB search failed: ${(e as Error).message}`)
     }
   }
 
-  // 2. Name+state search (with suffix-stripped retry)
-  if (schools.length === 0) {
-    const originalName = high_school_name.trim()
-    const strippedName = stripSchoolSuffix(originalName)
-    const searchNames  = originalName === strippedName
-      ? [originalName]
-      : [strippedName, originalName]   // try stripped first (portal uses short names)
+  // 2. Name+state search (fallback, with suffix-stripped retry)
+  const originalName = high_school_name.trim()
+  const strippedName = stripSchoolSuffix(originalName)
+  const searchNames  = originalName === strippedName
+    ? [originalName]
+    : [strippedName, originalName]
 
-    for (const searchName of searchNames) {
-      if (schools.length > 0) break
-      console.log(`[scrape-ncaa-courses] searching portal for "${searchName}" (${schoolState})...`)
-      try {
-        const html = await doSearch({ name: searchName, state: schoolState })
-        console.log(`[scrape-ncaa-courses] name search HTML: ${html.length} chars`)
-        schools = parseSearchResults(html)
-        console.log(`[scrape-ncaa-courses] name search parsed ${schools.length} school(s)`)
-      } catch (e) {
-        const msg = (e as Error).message
-        console.error(`[scrape-ncaa-courses] search failed: ${msg}`)
-        return json({ status: 'not_found', fallback: true, error: msg })
-      }
+  let schools: School[] = []
+  for (const searchName of searchNames) {
+    if (schools.length > 0) break
+    console.log(`[scrape-ncaa-courses] searching portal for "${searchName}" (${schoolState})...`)
+    try {
+      const html = await doSearch({ name: searchName, state: schoolState })
+      schools = parseSearchResults(html)
+      console.log(`[scrape-ncaa-courses] name search parsed ${schools.length} school(s)`)
+    } catch (e) {
+      const msg = (e as Error).message
+      console.error(`[scrape-ncaa-courses] name search failed: ${msg}`)
+      return json({ status: 'not_found', fallback: true, error: msg })
     }
   }
 
   console.log(`[scrape-ncaa-courses] final school count: ${schools.length}`)
 
-  if (schools.length === 0) {
-    return json({ status: 'not_found', fallback: true })
-  }
+  if (schools.length === 0) return json({ status: 'not_found', fallback: true })
 
   if (schools.length > 1) {
-    // Let the frontend display a picker; caller re-invokes with ncaa_school_code
     return json({ status: 'multiple_matches', schools })
   }
 
-  // ── Single match: check cache then scrape ──────────────────────────────
-
+  // Single name-search match — check cache then fetch course list
   const school = schools[0]
   const cached = await getFromCache(admin, school.ncaa_school_code)
   if (cached) {
@@ -226,10 +280,44 @@ Deno.serve(async (req: Request) => {
     return json({ status: 'found', ...cached, from_cache: true })
   }
 
-  return scrapeSchool(admin, school.ncaa_school_code, school.name, school.state)
+  return scrapeSchool(admin, school.ncaa_school_code, school.name, school.state, sessionCookie)
 })
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+/**
+ * Saves courses to cache and returns the found response.
+ * Used when the CEEB search returns courses directly (no separate hsCode step).
+ * ncaa_school_code is null because the portal didn't give us the internal code.
+ */
+async function cacheAndReturn(
+  admin:       ReturnType<typeof createClient>,
+  code:        string | null,
+  schoolName:  string,
+  schoolState: string,
+  courses:     { course_name: string; category: string }[],
+): Promise<Response> {
+  const scraped_at = new Date().toISOString()
+
+  if (code) {
+    const { error } = await admin
+      .from('ncaa_approved_courses_cache')
+      .upsert({ ncaa_school_code: code, school_name: schoolName, state: schoolState, courses, scraped_at },
+              { onConflict: 'ncaa_school_code' })
+    if (error) console.error(`[scrape-ncaa-courses] cache upsert failed: ${error.message}`)
+    else        console.log(`[scrape-ncaa-courses] cached ${courses.length} courses for ${code}`)
+  }
+
+  return json({
+    status:           'found',
+    ncaa_school_code: code,
+    school_name:      schoolName,
+    state:            schoolState,
+    courses,
+    from_cache:       false,
+    scraped_at,
+  })
+}
 
 /**
  * Returns a cached row if it exists and is less than 30 days old, else null.
@@ -256,14 +344,15 @@ async function getFromCache(
 }
 
 /**
- * Fetches the course list page for a known school code, parses it,
- * upserts the result into the cache, and returns the response.
+ * Fetches the course list for a known 6-digit hsCode (name-search path),
+ * upserts into cache, and returns the response.
  */
 async function scrapeSchool(
-  admin:       ReturnType<typeof createClient>,
-  code:        string,
-  schoolName:  string,
-  schoolState: string,
+  admin:         ReturnType<typeof createClient>,
+  code:          string,
+  schoolName:    string,
+  schoolState:   string,
+  sessionCookie: string,
 ): Promise<Response> {
   console.log(`[scrape-ncaa-courses] fetching courses for code=${code}`)
 
@@ -274,13 +363,16 @@ async function scrapeSchool(
       hsCode:         code,
     }).toString()
 
+    const headers: Record<string, string> = { ...POST_HEADERS }
+    if (sessionCookie) headers['Cookie'] = sessionCookie
+
     const ctl = new AbortController()
     const t   = setTimeout(() => ctl.abort(), SCRAPE_TIMEOUT)
     try {
-      const res = await fetch(NCAA_BASE, {
+      const res = await fetch(NCAA_ACTION_URL, {
         method:  'POST',
         signal:  ctl.signal,
-        headers: SCRAPE_HEADERS,
+        headers,
         body:    formBody,
       })
       if (!res.ok) throw new Error(`NCAA portal returned HTTP ${res.status}`)
@@ -303,55 +395,18 @@ async function scrapeSchool(
     return json({ status: 'not_found', fallback: true })
   }
 
-  // Write to cache (upsert on school code)
-  const scraped_at = new Date().toISOString()
-  const { error: upsertErr } = await admin
-    .from('ncaa_approved_courses_cache')
-    .upsert(
-      {
-        ncaa_school_code: code,
-        school_name:      schoolName,
-        state:            schoolState,
-        courses,
-        scraped_at,
-      },
-      { onConflict: 'ncaa_school_code' },
-    )
-
-  if (upsertErr) {
-    // Non-fatal — still return the scraped data even if caching fails
-    console.error(`[scrape-ncaa-courses] cache upsert failed: ${upsertErr.message}`)
-  } else {
-    console.log(`[scrape-ncaa-courses] cached ${courses.length} courses for ${code}`)
-  }
-
-  return json({
-    status:           'found',
-    ncaa_school_code: code,
-    school_name:      schoolName,
-    state:            schoolState,
-    courses,
-    from_cache:       false,
-    scraped_at,
-  })
+  return cacheAndReturn(admin, code, schoolName, schoolState, courses)
 }
 
 // ── HTML parsers ──────────────────────────────────────────────────────────────
 
 /**
- * Parses the POST search-results page from the NCAA HS Portal.
+ * Parses the name-search results page from the NCAA HS Portal.
  *
- * The portal returns a table with id="selectHsFormTable". Each row contains
- * a radio button whose value is the 6-digit hsCode, followed by cells for
- * name, address, city, state, and zip.
+ * Returns a table with id="selectHsFormTable". Each row has a radio input
+ * whose value is the 6-digit hsCode, plus cells for name, address, city, state.
  *
- * Column order (0-based):
- *   0 = radio (value = hsCode)
- *   1 = school name
- *   2 = address
- *   3 = city
- *   4 = state
- *   5 = zip
+ * Column order (0-based): 0=radio, 1=name, 2=address, 3=city, 4=state, 5=zip
  */
 function parseSearchResults(html: string): School[] {
   const root    = parseHtml(html)
@@ -367,9 +422,8 @@ function parseSearchResults(html: string): School[] {
     const cells = row.querySelectorAll('td')
     if (cells.length < 5) continue
 
-    // The radio input carries the hsCode. NCAA portal emits `type= "radio"`
-    // (note the space after =), which breaks attribute-exact selectors, so
-    // we match by name instead.
+    // NCAA portal emits `type= "radio"` (space after =), breaking attribute-exact
+    // selectors — match by name instead.
     const radio = cells[0].querySelector('input[name="hsCode"]')
     const code  = radio?.getAttribute('value')?.trim()
     if (!code) continue
@@ -386,12 +440,8 @@ function parseSearchResults(html: string): School[] {
 }
 
 /**
- * Parses the course-detail POST response from the NCAA HS Portal.
- *
- * Approved courses live in tables with IDs approvedCourseTable_1 through _5.
- * The category number maps to a subject area via CATEGORY_BY_NUM.
- * Title is in the second <td> (index 1) of each <tr> in <tbody>.
- * A leading "=" character (&#x3d;) marks disability-track courses — strip it.
+ * Parses course tables (approvedCourseTable_1..5) from a portal response.
+ * Used for both the CEEB direct-result path and the dedicated course-fetch path.
  */
 function parseCourseList(html: string): Course[] {
   const root    = parseHtml(html)
@@ -405,7 +455,7 @@ function parseCourseList(html: string): Course[] {
       const cells = row.querySelectorAll('td')
       if (cells.length < 2) continue
 
-      // Title is column index 1; strip leading "=" disability marker
+      // Title is column index 1; strip leading "=" disability-track marker
       const raw  = cells[1].text.trim()
       const name = raw.startsWith('=') ? raw.slice(1).trim() : raw
 
