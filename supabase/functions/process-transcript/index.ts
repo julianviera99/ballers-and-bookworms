@@ -472,9 +472,11 @@ Extract all courses from this transcript and return this exact JSON shape:
   // ── Calculate quality points and GPA ──────────────────────────────────
 
   const extractedCourses: ExtractedCourse[] = parsed.courses.map(c => {
-    const gradeVal   = GRADE_POINTS[c.grade] ?? GRADE_POINTS[c.grade?.toUpperCase()] ?? 0
-    const qualityPts = c.is_approved ? parseFloat((c.credit * gradeVal).toFixed(2)) : 0
-    return { ...c, quality_points: qualityPts }
+    const gradeVal   = GRADE_POINTS[c.grade] ?? GRADE_POINTS[c.grade?.toUpperCase()] ?? null
+    const isGraded   = gradeVal !== null
+    const credit     = isGraded ? c.credit : 0
+    const qualityPts = c.is_approved && isGraded ? parseFloat((credit * gradeVal).toFixed(2)) : 0
+    return { ...c, credit, quality_points: qualityPts }
   })
 
   const approvedOnly       = extractedCourses.filter(c => c.is_approved)
