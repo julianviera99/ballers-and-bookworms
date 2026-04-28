@@ -229,7 +229,7 @@ Deno.serve(async (req: Request) => {
       const schoolInfo = JSON.parse(cleaned)
       extractedSchoolName  = schoolInfo.high_school_name?.trim() ?? ''
       extractedSchoolState = schoolInfo.high_school_state?.trim().toUpperCase() ?? ''
-      extractedCeebCode    = schoolInfo.ceeb_code?.trim() || null
+      extractedCeebCode    = schoolInfo.ceeb_code != null ? String(schoolInfo.ceeb_code).trim() || null : null
       console.log(`[process-transcript] Pass 1 result: "${extractedSchoolName}", "${extractedSchoolState}", ceeb=${extractedCeebCode ?? 'none'}`)
     } catch (e) {
       console.error(`[process-transcript] Pass 1 failed: ${(e as Error).message}`)
@@ -303,6 +303,29 @@ Deno.serve(async (req: Request) => {
 
   // ── Pass 2: Full extraction + course mapping ────────────────────────────
 
+  // ── DIAG: raw text dump — tells us if Claude can read the image at all ──
+  console.log('[DIAG] requesting raw text transcription of transcript...')
+  try {
+    const rawText = await claudeCall(
+      ANTHROPIC_API_KEY,
+      CLAUDE_TIMEOUT_QUICK,
+      'You are reading a document. Transcribe ALL visible text exactly as it appears — every word, number, label, and section header. Do not interpret or summarize. Preserve the layout as closely as possible.',
+      [contentBlock, { type: 'text', text: 'Transcribe every piece of text visible in this document exactly as shown.' }],
+      2048,
+    )
+    console.log('[DIAG] raw transcript text:')
+    console.log(rawText)
+  } catch (e) {
+    console.warn(`[DIAG] raw text extraction failed: ${(e as Error).message}`)
+  }
+
+  // ── DIAG: approved course list ────────────────────────────────────────
+  console.log(`[DIAG] approved_list_available=${approvedCourses.length > 0} count=${approvedCourses.length}`)
+  if (approvedCourses.length > 0) {
+    console.log('[DIAG] approved courses sent to Claude:')
+    approvedCourses.forEach((c, i) => console.log(`  [DIAG]  ${i + 1}. ${c.course_name} (${c.category})`))
+  }
+
   const approvedCourseText = approvedCourses.length > 0
     ? approvedCourses.map(c => `  - ${c.course_name} (${c.category})`).join('\n')
     : '  (No approved course list available — mark all courses as Not Approved unless they are clearly non-core like PE or Health)'
@@ -327,7 +350,13 @@ Mapping rules:
 5. needs_review=true if the match is uncertain OR if the grade/credit is illegible OR if the course is in-progress (no final grade yet).
 6. credit: use the value shown on the transcript. If not shown, infer 1.0 for year-long, 0.5 for semester.
 7. grade: normalize to A, A-, B+, B, B-, C+, C, C-, D+, D, D-, F. In-progress courses with no grade: use "In Progress".
-8. semester: capture the grade level and term if shown (e.g. "9th Grade", "10th Grade Fall").
+8. semester: return the grade level as "9th Grade", "10th Grade", "11th Grade", or "12th Grade".
+   If the transcript shows school years (e.g. "22-23") rather than grade levels, convert them:
+   use the student's current grade as the anchor for the most recent completed year, then count back.
+   For example, if the student is currently in 12th grade and "25-26" is the current year,
+   then "24-25" = 11th Grade, "23-24" = 10th Grade, "22-23" = 9th Grade.
+   If the term (fall/spring) is also shown, append it: "10th Grade Fall".
+   If the grade level cannot be determined, return null.
 
 Always respond with valid JSON only — no prose, no markdown fences.`
 
@@ -366,6 +395,9 @@ Extract all courses from this transcript and return this exact JSON shape:
       8192,
     )
     console.log(`[process-transcript] Pass 2 response: ${claudeResponse.length} chars`)
+    // ── DIAG: raw Claude response ────────────────────────────────────────
+    console.log('[DIAG] raw Claude Pass 2 response:')
+    console.log(claudeResponse)
   } catch (e) {
     const msg = (e as Error).message
     console.error(`[process-transcript] Pass 2 failed: ${msg}`)
@@ -397,6 +429,36 @@ Extract all courses from this transcript and return this exact JSON shape:
     console.error(`[process-transcript] JSON parse failed: ${(e as Error).message}`)
     console.error(`[process-transcript] Raw: ${claudeResponse}`)
     return json({ error: 'Failed to parse transcript analysis response' }, 500)
+  }
+
+  // ── DIAG: courses Claude identified ──────────────────────────────────
+  console.log(`[DIAG] Claude identified ${parsed.courses.length} courses:`)
+  parsed.courses.forEach((c, i) => {
+    console.log(`  [DIAG]  ${i + 1}. "${c.course_name}" | category="${c.mapped_category}" | approved=${c.is_approved} | confidence=${c.confidence} | grade=${c.grade} | credit=${c.credit} | semester=${c.semester}`)
+  })
+
+  // ── DIAG: per-course approved-list comparison ─────────────────────────
+  // For each course Claude marked not-approved or non-core, show which
+  // approved courses (if any) have overlapping tokens — purely informational.
+  if (approvedCourses.length > 0) {
+    console.log('[DIAG] approved-list match check for non-approved courses:')
+    const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim()
+    parsed.courses
+      .filter(c => !c.is_approved)
+      .forEach(c => {
+        const tokens = normalize(c.course_name).split(/\s+/).filter(t => t.length > 2)
+        const candidates = approvedCourses
+          .map(a => ({ name: a.course_name, cat: a.category, score: tokens.filter(t => normalize(a.course_name).includes(t)).length }))
+          .filter(a => a.score > 0)
+          .sort((a, b) => b.score - a.score)
+          .slice(0, 3)
+        if (candidates.length > 0) {
+          console.log(`  [DIAG]  "${c.course_name}" closest approved matches:`)
+          candidates.forEach(a => console.log(`    [DIAG]    score=${a.score} "${a.name}" (${a.cat})`))
+        } else {
+          console.log(`  [DIAG]  "${c.course_name}" — no token overlap with any approved course`)
+        }
+      })
   }
 
   // ── Calculate quality points and GPA ──────────────────────────────────
@@ -528,6 +590,7 @@ Extract all courses from this transcript and return this exact JSON shape:
         is_approved:     c.is_approved,
         confidence:      c.confidence,
         needs_review:    c.needs_review,
+        semester:        c.semester ?? null,
       })))
 
     if (coursesErr) {
