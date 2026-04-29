@@ -143,7 +143,7 @@ export default function Demo() {
           <div className="bg-brand/10 border border-brand/30 rounded-2xl p-6 space-y-3">
             <p className="text-sm text-gray-800 leading-relaxed">
               You do <strong>not</strong> need to create an account or connect GitHub to explore the app.
-              Instead, look for the floating <strong className="font-bold">yellow "DEV" button</strong> in
+              Instead, look for the floating <strong className="font-bold">black and yellow "DEV" button</strong> in
               the bottom-right corner of any page after you click into the app. Click it to instantly
               switch between any of the five test personas below — athletes and staff — with a fully
               authenticated session and real data.
