@@ -149,10 +149,7 @@ function FindMentorContent() {
     }, 3000)
 
     try {
-      let plainText = form.plain_text_request.trim()
-      if (form.preferences.trim()) {
-        plainText += `\n\nAdditional preferences: ${form.preferences.trim()}`
-      }
+      const plainText = form.plain_text_request.trim()
 
       // Get the current session token so we can set Authorization ourselves.
       // Using raw fetch instead of supabase.functions.invoke avoids supabase-js
@@ -369,20 +366,6 @@ function FindMentorContent() {
                 </div>
               </div>
 
-              {/* Optional preferences */}
-              <div>
-                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">
-                  Additional preferences{' '}
-                  <span className="text-gray-400 font-normal normal-case">(optional)</span>
-                </label>
-                <textarea
-                  value={form.preferences}
-                  onChange={e => setField('preferences', e.target.value)}
-                  rows={2}
-                  placeholder="e.g. Prefer a mentor who shares my background, played the same position, or attended an HBCU."
-                  className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand resize-none"
-                />
-              </div>
             </div>
 
             <button

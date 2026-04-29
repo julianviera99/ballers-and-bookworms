@@ -96,6 +96,12 @@ export default function Nav() {
                 ))}
               </Fragment>
             ))}
+            <Link
+              to="/demo"
+              className="text-sm font-semibold text-brand hover:text-brand-dark transition-colors"
+            >
+              Demo Guide
+            </Link>
             <button
               onClick={handleSignOut}
               className="text-sm font-semibold bg-brand text-black px-4 py-1.5 rounded-lg hover:bg-brand-dark transition-colors"
@@ -145,6 +151,13 @@ export default function Nav() {
               ))}
             </Fragment>
           ))}
+          <Link
+            to="/demo"
+            onClick={() => setOpen(false)}
+            className="block py-3 text-sm font-semibold text-brand border-b border-white/10"
+          >
+            Demo Guide
+          </Link>
           <button
             onClick={handleSignOut}
             className="block w-full text-left py-3 text-sm text-white/70 hover:text-white"

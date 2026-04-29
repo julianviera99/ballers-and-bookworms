@@ -21,12 +21,15 @@ export default function DevSwitcher() {
     if (error) {
       console.error('[DevSwitcher] sign-in failed:', error.message)
       alert(`Switch failed: ${error.message}\n\nMake sure you've run: npm run seed`)
+      setSwitching(null)
+      return
     }
-    setSwitching(null)
+    window.location.replace(persona.role === 'staff' ? '/staff' : '/dashboard')
   }
 
-  async function signOut() {
+  async function goToLanding() {
     await supabase.auth.signOut()
+    window.location.replace('/')
   }
 
   const currentEmail = session?.user?.email
@@ -99,15 +102,13 @@ export default function DevSwitcher() {
 
           {/* Footer */}
           <div className="px-3 py-2 border-t border-gray-800 space-y-1.5">
-            {currentEmail && (
-              <button
-                onClick={signOut}
-                disabled={!!switching}
-                className="text-[10px] text-gray-500 hover:text-gray-300 transition-colors disabled:opacity-50"
-              >
-                Sign out
-              </button>
-            )}
+            <button
+              onClick={goToLanding}
+              disabled={!!switching}
+              className="text-[10px] text-yellow-400/70 hover:text-yellow-400 transition-colors disabled:opacity-50"
+            >
+              ← Landing Page
+            </button>
             <p className="text-[10px] text-gray-600">
               Reset:{' '}
               <code className="text-gray-500 bg-gray-900 px-1 py-0.5 rounded">
