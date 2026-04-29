@@ -521,7 +521,7 @@ Extract all courses from this transcript and return this exact JSON shape:
 
   const diEligible =
     englishCount >= 4 && mathCount >= 3 && scienceCount >= 2 &&
-    socialCount >= 2 && diCoreTotal >= 16
+    socialCount >= 2 && diCoreTotal >= 16 && coreGpa >= 2.3
 
   const di: DiResult = {
     eligible:             diEligible,
@@ -541,7 +541,7 @@ Extract all courses from this transcript and return this exact JSON shape:
 
   const diiEligible =
     englishCount >= 3 && mathCount >= 2 && scienceCount >= 2 &&
-    socialCount >= 2 && diCoreTotal >= 16
+    socialCount >= 2 && diCoreTotal >= 16 && coreGpa >= 2.2
 
   const dii: DiiResult = {
     eligible:             diiEligible,
