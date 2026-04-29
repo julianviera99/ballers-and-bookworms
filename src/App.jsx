@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom'
 // Public
 import Landing     from './pages/Landing'
 import MentorApply from './pages/MentorApply'
+import Demo        from './pages/Demo'
 
 // Student athlete (ProtectedRoute inside each page)
 import Dashboard  from './pages/Dashboard'
@@ -26,6 +27,7 @@ export default function App() {
       <Routes>
         {/* Public */}
         <Route path="/"             element={<Landing />} />
+        <Route path="/demo"         element={<Demo />} />
         <Route path="/mentor/apply" element={<MentorApply />} />
 
         {/* Student athlete */}

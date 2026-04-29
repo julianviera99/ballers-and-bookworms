@@ -75,12 +75,20 @@ export default function Landing() {
       {/* Top bar */}
       <div className="bg-black px-6 py-4 flex items-center justify-between">
         <img src="/brand/bandb_logo1.png" alt="Ballers and Bookworms" className="h-8 w-auto" />
-        <Link
-          to="/mentor/apply"
-          className="text-xs font-bold text-white/60 hover:text-white uppercase tracking-wide transition-colors"
-        >
-          Become a Mentor →
-        </Link>
+        <div className="flex items-center gap-5">
+          <Link
+            to="/demo"
+            className="text-xs font-bold text-brand hover:text-brand-dark uppercase tracking-wide transition-colors"
+          >
+            Demo Guide →
+          </Link>
+          <Link
+            to="/mentor/apply"
+            className="text-xs font-bold text-white/60 hover:text-white uppercase tracking-wide transition-colors"
+          >
+            Become a Mentor →
+          </Link>
+        </div>
       </div>
 
       {/* Hero */}
@@ -103,6 +111,16 @@ export default function Landing() {
               The private portal for Ballers &amp; Bookworms student athletes.
             </p>
           </div>
+
+          <Link
+            to="/demo"
+            className="inline-flex items-center gap-2 bg-brand hover:bg-brand-dark text-black font-black px-7 py-3 rounded-xl transition-colors text-sm uppercase tracking-wide"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+            </svg>
+            Professor Demo Guide
+          </Link>
 
           <div className="space-y-5">
 
