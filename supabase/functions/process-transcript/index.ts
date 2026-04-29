@@ -349,7 +349,14 @@ Mapping rules:
 4. confidence: "high"=obvious match, "medium"=inferred match, "low"=uncertain.
 5. needs_review=true if the match is uncertain OR if the grade/credit is illegible OR if the course is in-progress (no final grade yet).
 6. credit: use the value shown on the transcript. If not shown, infer 1.0 for year-long, 0.5 for semester.
-7. grade: normalize to A, A-, B+, B, B-, C+, C, C-, D+, D, D-, F. In-progress courses with no grade: use "In Progress".
+7. grade: convert to a letter grade using this exact process in order:
+   Step 1 — Determine the scale: identify what grading scale this transcript uses (e.g. 100-point numeric, letter-only, 4.0 GPA scale).
+   Step 2 — Use the transcript's own legend: if the transcript prints an explicit grade scale or key (e.g. a table mapping ranges to letters), use that mapping exactly.
+   Step 3 — Apply the default 100-point scale: if the scale is 100-point and no legend is printed on the transcript, use exactly these cutoffs with no exceptions:
+     90–100 → A | 80–89 → B | 70–79 → C | 65–69 → D | 0–64 → F
+   Step 4 — Other scales: for non-100-point scales with no legend, use your best judgment to convert to A, B, C, D, or F.
+   Do not use plus/minus variants (A-, B+, etc.) unless the transcript's own printed scale legend explicitly includes them.
+   In-progress courses with no final grade: use "In Progress".
 8. semester: return the grade level as "9th Grade", "10th Grade", "11th Grade", or "12th Grade".
    If the transcript shows school years (e.g. "22-23") rather than grade levels, convert them:
    use the student's current grade as the anchor for the most recent completed year, then count back.
@@ -393,6 +400,7 @@ Extract all courses from this transcript and return this exact JSON shape:
       systemPrompt,
       [contentBlock, { type: 'text', text: userPrompt }],
       8192,
+      0,
     )
     console.log(`[process-transcript] Pass 2 response: ${claudeResponse.length} chars`)
     // ── DIAG: raw Claude response ────────────────────────────────────────
@@ -464,9 +472,11 @@ Extract all courses from this transcript and return this exact JSON shape:
   // ── Calculate quality points and GPA ──────────────────────────────────
 
   const extractedCourses: ExtractedCourse[] = parsed.courses.map(c => {
-    const gradeVal   = GRADE_POINTS[c.grade] ?? GRADE_POINTS[c.grade?.toUpperCase()] ?? 0
-    const qualityPts = c.is_approved ? parseFloat((c.credit * gradeVal).toFixed(2)) : 0
-    return { ...c, quality_points: qualityPts }
+    const gradeVal   = GRADE_POINTS[c.grade] ?? GRADE_POINTS[c.grade?.toUpperCase()] ?? null
+    const isGraded   = gradeVal !== null
+    const credit     = isGraded ? c.credit : 0
+    const qualityPts = c.is_approved && isGraded ? parseFloat((credit * gradeVal).toFixed(2)) : 0
+    return { ...c, credit, quality_points: qualityPts }
   })
 
   const approvedOnly       = extractedCourses.filter(c => c.is_approved)
@@ -511,7 +521,7 @@ Extract all courses from this transcript and return this exact JSON shape:
 
   const diEligible =
     englishCount >= 4 && mathCount >= 3 && scienceCount >= 2 &&
-    socialCount >= 2 && diCoreTotal >= 16
+    socialCount >= 2 && diCoreTotal >= 16 && coreGpa >= 2.3
 
   const di: DiResult = {
     eligible:             diEligible,
@@ -531,7 +541,7 @@ Extract all courses from this transcript and return this exact JSON shape:
 
   const diiEligible =
     englishCount >= 3 && mathCount >= 2 && scienceCount >= 2 &&
-    socialCount >= 2 && diCoreTotal >= 16
+    socialCount >= 2 && diCoreTotal >= 16 && coreGpa >= 2.2
 
   const dii: DiiResult = {
     eligible:             diiEligible,
@@ -632,6 +642,7 @@ async function claudeCall(
   system:     string,
   content:    unknown[],
   maxTokens:  number,
+  temperature = 1,
 ): Promise<string> {
   const ctl = new AbortController()
   const t   = setTimeout(() => ctl.abort(), timeoutMs)
@@ -648,6 +659,7 @@ async function claudeCall(
       body: JSON.stringify({
         model:      CLAUDE_MODEL,
         max_tokens: maxTokens,
+        temperature,
         system,
         messages: [{ role: 'user', content }],
       }),
