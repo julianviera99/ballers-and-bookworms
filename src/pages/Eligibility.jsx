@@ -264,6 +264,7 @@ function EligibilityContent() {
   const totalQP         = approvedCourses.reduce((s, c) => s + c.quality_points, 0)
 
   const pre7th = approvedCourses.filter(c => {
+    if (c.grade === 'In Progress' || (c.quality_points ?? 0) < 1) return false
     if (!c.semester) return false
     const s = c.semester.toLowerCase()
     return s.includes('9th') || s.includes('10th') ||
@@ -281,35 +282,6 @@ function EligibilityContent() {
     if (courseFilter === 'review')       return c.needs_review
     return true
   }) ?? []
-
-  // ── Recommendations ─────────────────────────────────────────────────────
-
-  function buildRecs() {
-    if (!result) return []
-    const { di } = result
-    const recs = []
-    const gap = (have, need, label) => {
-      if (have < need) recs.push(`You still need ${need - have} more ${label} course${need - have > 1 ? 's' : ''} to meet the DI minimum of ${need}.`)
-    }
-    gap(di.english_count, 4, 'English')
-    gap(di.math_count, 3, 'Math')
-    gap(di.science_count, 2, 'Science')
-    gap(di.social_science_count, 2, 'Social Science')
-    if (di.core_courses < 16) recs.push(`You need ${16 - di.core_courses} more approved core courses to reach the required 16.`)
-    if (!di.meets_10_7_rule) {
-      const need10 = Math.max(0, 10 - pre7th.length)
-      const need7  = Math.max(0, 7 - pre7thEMSCount)
-      if (need10 > 0) recs.push(`10/7 Rule: you need ${need10} more core course${need10 > 1 ? 's' : ''} completed before your 7th semester.`)
-      if (need7  > 0) recs.push(`10/7 Rule: ${need7} of those pre-7th-semester courses must be in English, Math, or Science.`)
-    }
-    if (result.core_course_gpa < 2.3) recs.push(`Your core-course GPA (${result.core_course_gpa.toFixed(3)}) is below the DI sliding-scale minimum of 2.300.`)
-    const reviewCount = result.courses.filter(c => c.needs_review && c.is_approved).length
-    if (reviewCount > 0) recs.push(`${reviewCount} approved course${reviewCount > 1 ? 's are' : ' is'} flagged for review — confirm these match your school's approved list.`)
-    if (!result.approved_list_available) recs.push("No NCAA-approved course list was found for your school. All courses show as \"Not Approved\" — contact the NCAA Eligibility Center to verify your school's list.")
-    return recs
-  }
-
-  const recs = buildRecs()
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -568,13 +540,22 @@ function EligibilityContent() {
           const extraReq = isDI ? 1 : 3
           const ssReq    = 2
 
-          // EMS overflow = courses in English/Math/Science beyond subject-specific minimums
-          const emsOverflow  = [...engAll.slice(engReq), ...mathAll.slice(mathReq), ...sciAll.slice(sciReq)]
-          const extraCourses = emsOverflow.slice(0, extraReq)
-          const ssOverflow   = ssAll.slice(ssReq)
+          // EMS overflow: a course only flows to Extra Year if its primary category
+          // is already fully satisfied with passing courses (QP >= 1, not In Progress).
+          const engPassCount  = engAll.filter(c => c.grade !== 'In Progress' && (c.quality_points ?? 0) >= 1).length
+          const mathPassCount = mathAll.filter(c => c.grade !== 'In Progress' && (c.quality_points ?? 0) >= 1).length
+          const sciPassCount  = sciAll.filter(c => c.grade !== 'In Progress' && (c.quality_points ?? 0) >= 1).length
+          const engOverflow   = engPassCount  >= engReq  ? engAll.slice(engReq)   : []
+          const mathOverflow  = mathPassCount >= mathReq ? mathAll.slice(mathReq) : []
+          const sciOverflow   = sciPassCount  >= sciReq  ? sciAll.slice(sciReq)   : []
+          const emsOverflow   = [...engOverflow, ...mathOverflow, ...sciOverflow]
+          const extraCourses  = emsOverflow.slice(0, extraReq)
+          const ssOverflow    = ssAll.slice(ssReq)
           // Other Academic = FL + Additional Academic + excess EMS beyond the extra slot + SS overflow
-          const otherCourses = [...flAll, ...addCourses, ...emsOverflow.slice(extraReq), ...ssOverflow]
+          const otherCourses  = [...flAll, ...addCourses, ...emsOverflow.slice(extraReq), ...ssOverflow]
 
+          // SECTIONS — each entry augmented with pre-computed passing stats so both the
+          // worksheet display and the Action Plan read from exactly the same source.
           const SECTIONS = [
             { label: 'English',                                               courses: engAll.slice(0, engReq),   req: engReq   },
             { label: 'Mathematics',                                           courses: mathAll.slice(0, mathReq), req: mathReq  },
@@ -583,7 +564,56 @@ function EligibilityContent() {
                           : 'Extra Years — English, Math, or Science',        courses: extraCourses,              req: extraReq },
             { label: 'Social Science',                                        courses: ssAll.slice(0, ssReq),     req: ssReq    },
             { label: 'Other Academic Courses',                                courses: otherCourses,              req: 4        },
-          ]
+          ].map(sec => {
+            const passing     = sec.courses.filter(c => c.grade !== 'In Progress' && (c.quality_points ?? 0) >= 1)
+            const countMet    = passing.length >= sec.req
+            const passQP      = passing.reduce((s, c) => s + (c.quality_points ?? 0), 0)
+            const passCr      = passing.reduce((s, c) => s + (c.credit ?? 0), 0)
+            const catGpa      = passCr > 0 ? passQP / passCr : null
+            const statusGreen = countMet && (catGpa === null || catGpa >= 2.3)
+            const statusAmber = countMet && catGpa !== null && catGpa < 2.3
+            const statusRed   = !countMet
+            return { ...sec, passing, countMet, catGpa, statusGreen, statusAmber, statusRed }
+          })
+
+          // Action Plan — derived directly from SECTIONS so it always matches the worksheet.
+          const apCritical = []
+          const apWarnings = []
+          const apPositives = []
+          for (const sec of SECTIONS) {
+            if (sec.statusRed) {
+              const gap = sec.req - sec.passing.length
+              apCritical.push(`${sec.label}: need ${gap} more passing course${gap > 1 ? 's' : ''} (have ${sec.passing.length}/${sec.req}).`)
+            } else if (sec.statusAmber) {
+              apWarnings.push(`${sec.label}: count met but category GPA (${sec.catGpa.toFixed(2)}) is below 2.300.`)
+            } else {
+              apPositives.push(`${sec.label}: requirement met (${sec.passing.length}/${sec.req}).`)
+            }
+          }
+          const worksheet10_7Met = pre7th.length >= 10 && pre7thEMSCount >= 7
+          if (isDI && !worksheet10_7Met) {
+            const need10 = Math.max(0, 10 - pre7th.length)
+            const need7  = Math.max(0, 7 - pre7thEMSCount)
+            if (need10 > 0) apCritical.push(`10/7 Rule: need ${need10} more core course${need10 > 1 ? 's' : ''} before 7th semester.`)
+            if (need7  > 0) apCritical.push(`10/7 Rule: need ${need7} more English/Math/Science course${need7 > 1 ? 's' : ''} in pre-7th semester.`)
+          } else if (isDI) {
+            apPositives.push('10/7 Rule met — enough core courses completed before senior year.')
+          }
+          const gpaMin = isDI ? 2.3 : 2.2
+          if (core_course_gpa < gpaMin) {
+            apCritical.push(`Core GPA (${core_course_gpa.toFixed(3)}) is below the ${isDI ? 'DI' : 'DII'} minimum of ${gpaMin.toFixed(3)}.`)
+          } else if (core_course_gpa < 2.5) {
+            apWarnings.push(`Core GPA (${core_course_gpa.toFixed(3)}) meets the minimum but has little margin — aim for 2.500+.`)
+          } else {
+            apPositives.push(`Core GPA (${core_course_gpa.toFixed(3)}) comfortably exceeds ${isDI ? 'DI' : 'DII'} minimum.`)
+          }
+          const reviewCount = result.courses.filter(c => c.needs_review && c.is_approved).length
+          if (reviewCount > 0) {
+            apWarnings.push(`${reviewCount} approved course${reviewCount > 1 ? 's are' : ' is'} flagged for review — confirm against your school's NCAA-approved list.`)
+          }
+          if (!result.approved_list_available) {
+            apWarnings.push('No NCAA-approved course list found for your school — all courses show as "Not Approved." Contact the NCAA Eligibility Center to verify.')
+          }
 
           const inProgressCourses  = result.courses.filter(c => c.is_approved && c.grade === 'In Progress')
           const needsReviewCourses = result.courses.filter(c => c.needs_review && !(c.is_approved && c.grade === 'In Progress'))
@@ -616,6 +646,56 @@ function EligibilityContent() {
                   <p className="text-[10px] opacity-60 mt-0.5">{totalQP.toFixed(2)} QP ÷ {total_core_credits.toFixed(1)} credits</p>
                 </div>
               </div>
+
+              {/* Action Plan */}
+              {(apCritical.length > 0 || apWarnings.length > 0 || apPositives.length > 0) && (
+                <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+                  <div className="bg-black px-5 py-3.5">
+                    <h2 className="font-bold text-white uppercase tracking-wide text-sm">Action Plan</h2>
+                  </div>
+                  <div className="divide-y divide-gray-100">
+                    {apCritical.length > 0 && (
+                      <div className="px-5 py-4 space-y-2.5">
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-red-500">Critical</p>
+                        {apCritical.map((rec, i) => (
+                          <div key={i} className="flex gap-2.5">
+                            <svg className="w-4 h-4 flex-shrink-0 mt-0.5 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                            <p className="text-sm text-gray-800">{rec}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {apWarnings.length > 0 && (
+                      <div className="px-5 py-4 space-y-2.5">
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-amber-500">Watch Out</p>
+                        {apWarnings.map((rec, i) => (
+                          <div key={i} className="flex gap-2.5">
+                            <svg className="w-4 h-4 flex-shrink-0 mt-0.5 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v4m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                            </svg>
+                            <p className="text-sm text-gray-800">{rec}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {apPositives.length > 0 && (
+                      <div className="px-5 py-4 space-y-2.5">
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-green-600">Looking Good</p>
+                        {apPositives.map((rec, i) => (
+                          <div key={i} className="flex gap-2.5">
+                            <svg className="w-4 h-4 flex-shrink-0 mt-0.5 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                            </svg>
+                            <p className="text-sm text-gray-800">{rec}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {/* DI / DII tabs */}
               <div className="flex rounded-2xl border border-gray-200 overflow-hidden bg-white shadow-sm">
@@ -662,25 +742,25 @@ function EligibilityContent() {
 
                 {/* Subject sections */}
                 {SECTIONS.map(section => {
-                  const courses = section.courses
-                  const req     = section.req
-                  const met     = courses.length >= req
-                  const secQP   = courses.reduce((s, c) => s + (c.quality_points ?? 0), 0)
-                  const secCr   = courses.reduce((s, c) => s + (c.credit ?? 0), 0)
+                  const { courses, req, passing, countMet, catGpa, statusGreen, statusAmber, statusRed } = section
+                  const secQP = courses.reduce((s, c) => s + (c.quality_points ?? 0), 0)
+                  const secCr = courses.reduce((s, c) => s + (c.credit ?? 0), 0)
 
                   return (
-                    <div key={section.cat} className="border-b border-gray-100 last:border-0">
+                    <div key={section.label} className="border-b border-gray-100 last:border-0">
                       {/* Section header */}
-                      <div className={`px-5 py-2.5 flex items-center justify-between gap-3 ${met ? 'bg-green-50' : 'bg-red-50'}`}>
+                      <div className={`px-5 py-2.5 flex items-center justify-between gap-3 ${statusGreen ? 'bg-green-50' : statusAmber ? 'bg-amber-50' : 'bg-red-50'}`}>
                         <div className="flex items-center gap-2 min-w-0">
-                          {met
-                            ? <svg className="w-4 h-4 text-green-600 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
-                            : <svg className="w-4 h-4 text-red-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-                          }
-                          <span className="font-bold text-sm text-black truncate">{section.label}</span>
+                          {statusGreen && <svg className="w-4 h-4 text-green-600 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>}
+                          {statusAmber && <svg className="w-4 h-4 text-amber-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v4m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>}
+                          {statusRed   && <svg className="w-4 h-4 text-red-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>}
+                          <div className="min-w-0">
+                            <span className="font-bold text-sm text-black block truncate">{section.label}</span>
+                            {statusAmber && <span className="text-[10px] font-semibold text-amber-600">GPA at risk</span>}
+                          </div>
                         </div>
-                        <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full flex-shrink-0 ${met ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-700'}`}>
-                          {courses.length}/{req}{met ? ' ✓' : ` — need ${req - courses.length} more`}
+                        <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full flex-shrink-0 ${statusGreen ? 'bg-green-100 text-green-800' : statusAmber ? 'bg-amber-100 text-amber-800' : 'bg-red-100 text-red-700'}`}>
+                          {passing.length}/{req}{countMet ? ' ✓' : ` — need ${req - passing.length} more`}
                         </span>
                       </div>
 
@@ -798,14 +878,15 @@ function EligibilityContent() {
               {/* DI — 10/7 Rule */}
               {isDI && (
                 <Card title="DI — 10/7 Rule" badge={
-                  <span className={`text-xs font-bold px-2.5 py-0.5 rounded-full ${di.meets_10_7_rule ? STATUS_CFG.on_track.badge : STATUS_CFG.at_risk.badge}`}>
-                    {di.meets_10_7_rule ? 'Met' : 'Not Yet Met'}
+                  <span className={`text-xs font-bold px-2.5 py-0.5 rounded-full ${worksheet10_7Met ? STATUS_CFG.on_track.badge : STATUS_CFG.at_risk.badge}`}>
+                    {worksheet10_7Met ? 'Met' : 'Not Yet Met'}
                   </span>
                 }>
-                  <div className="p-5 space-y-4">
+                  <div className="p-5 space-y-5">
                     <p className="text-xs text-gray-500 leading-relaxed">
                       DI athletes must complete 10 of their 16 core courses <strong>before the start of 7th semester</strong> (before senior year),
                       with at least 7 of those 10 in English, Math, or Science.
+                      Only courses with a passing grade (D or above) count.
                     </p>
 
                     <div className="grid grid-cols-2 gap-3">
@@ -823,26 +904,54 @@ function EligibilityContent() {
                       </div>
                     </div>
 
-                    {pre7th.length > 0 ? (
-                      <div>
-                        <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-2">Pre-7th Semester Qualifying Courses</p>
-                        <div className="space-y-1.5">
-                          {pre7th.map((c, i) => {
-                            const isEMS = c.mapped_category === 'English' || c.mapped_category === 'Mathematics' || c.mapped_category === 'Natural/Physical Science'
-                            return (
-                              <div key={i} className={`flex items-center gap-3 px-3 py-2.5 rounded-xl ${isEMS ? 'bg-green-50' : 'bg-gray-50'}`}>
-                                <div className={`w-2 h-2 rounded-full flex-shrink-0 ${isEMS ? 'bg-green-500' : 'bg-gray-300'}`} />
-                                <span className={`flex-1 text-sm leading-snug ${isEMS ? 'text-black font-medium' : 'text-gray-600'}`}>{c.course_name}</span>
-                                {c.semester && <span className="text-[10px] text-gray-400 flex-shrink-0 hidden sm:block">{c.semester}</span>}
-                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full flex-shrink-0 ${isEMS ? 'bg-green-100 text-green-800' : 'bg-gray-200 text-gray-600'}`}>
-                                  {isEMS ? 'E/M/S ✓' : (CAT_SHORT[c.mapped_category] ?? c.mapped_category)}
-                                </span>
+                    {pre7th.length > 0 ? (() => {
+                      const emsCourses   = pre7th.filter(c => c.mapped_category === 'English' || c.mapped_category === 'Mathematics' || c.mapped_category === 'Natural/Physical Science')
+                      const otherCourses = pre7th.filter(c => c.mapped_category !== 'English' && c.mapped_category !== 'Mathematics' && c.mapped_category !== 'Natural/Physical Science')
+                      return (
+                        <div className="space-y-4">
+                          {/* List 1: English, Math & Science */}
+                          <div>
+                            <div className="flex items-center justify-between mb-2">
+                              <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">English, Math &amp; Science Courses</p>
+                              <span className="text-[10px] font-semibold text-gray-500">{emsCourses.length} of 7 required</span>
+                            </div>
+                            {emsCourses.length > 0 ? (
+                              <div className="divide-y divide-gray-100 border border-gray-100 rounded-xl overflow-hidden">
+                                {emsCourses.map((c, i) => (
+                                  <div key={i} className="flex items-center gap-3 px-3 py-2.5">
+                                    <span className="flex-1 text-sm text-black leading-snug">{c.course_name}</span>
+                                    {c.semester && <span className="text-[10px] text-gray-400 flex-shrink-0 hidden sm:block">{c.semester}</span>}
+                                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 flex-shrink-0">
+                                      {CAT_SHORT[c.mapped_category] ?? c.mapped_category}
+                                    </span>
+                                  </div>
+                                ))}
                               </div>
-                            )
-                          })}
+                            ) : (
+                              <p className="text-xs text-gray-400 italic">No English, Math, or Science courses completed before 7th semester.</p>
+                            )}
+                          </div>
+
+                          {/* List 2: Other qualifying courses */}
+                          {otherCourses.length > 0 && (
+                            <div>
+                              <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-2">Other Qualifying Courses</p>
+                              <div className="divide-y divide-gray-100 border border-gray-100 rounded-xl overflow-hidden">
+                                {otherCourses.map((c, i) => (
+                                  <div key={i} className="flex items-center gap-3 px-3 py-2.5">
+                                    <span className="flex-1 text-sm text-black leading-snug">{c.course_name}</span>
+                                    {c.semester && <span className="text-[10px] text-gray-400 flex-shrink-0 hidden sm:block">{c.semester}</span>}
+                                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 flex-shrink-0">
+                                      {CAT_SHORT[c.mapped_category] ?? c.mapped_category}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
                         </div>
-                      </div>
-                    ) : (
+                      )
+                    })() : (
                       <p className="text-sm text-gray-400 italic">No qualifying pre-7th semester courses found. Check that semester data was extracted correctly from your transcript.</p>
                     )}
                   </div>
@@ -884,22 +993,6 @@ function EligibilityContent() {
                     })}
                   </ul>
                 </div>
-              )}
-
-              {/* Recommendations */}
-              {recs.length > 0 && (
-                <Card title="Recommendations">
-                  <div className="divide-y divide-gray-50">
-                    {recs.map((rec, i) => (
-                      <div key={i} className="flex gap-3 px-5 py-3.5">
-                        <svg className="w-4 h-4 flex-shrink-0 mt-0.5 text-yellow-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v4m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                        </svg>
-                        <p className="text-sm text-gray-700">{rec}</p>
-                      </div>
-                    ))}
-                  </div>
-                </Card>
               )}
 
               {/* Not-approved / unmatched courses */}

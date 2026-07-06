@@ -88,11 +88,19 @@ interface Course {
   category:    string
 }
 
+interface GradingScale {
+  A: number
+  B: number
+  C: number
+  D: number
+}
+
 interface CacheRow {
   ncaa_school_code: string
   school_name:      string
   state:            string
   courses:          Course[]
+  grading_scale:    GradingScale | null
   scraped_at:       string
 }
 
@@ -233,7 +241,8 @@ Deno.serve(async (req: Request) => {
       if (courses.length > 0) {
         // Portal resolved the CEEB to one school and returned its course list directly
         console.log(`[scrape-ncaa-courses] CEEB search returned ${courses.length} courses directly`)
-        return cacheAndReturn(admin, null, high_school_name.trim(), schoolState, courses)
+        const gradingScale = parseGradingScale(html)
+        return cacheAndReturn(admin, null, high_school_name.trim(), schoolState, courses, gradingScale)
       }
       // If no course tables, fall through — may have returned #selectHsFormTable
       console.log('[scrape-ncaa-courses] CEEB search returned no course tables; falling back to name search')
@@ -286,24 +295,28 @@ Deno.serve(async (req: Request) => {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /**
- * Saves courses to cache and returns the found response.
+ * Saves courses + grading scale to cache and returns the found response.
  * Used when the CEEB search returns courses directly (no separate hsCode step).
  * ncaa_school_code is null because the portal didn't give us the internal code.
  */
 async function cacheAndReturn(
-  admin:       ReturnType<typeof createClient>,
-  code:        string | null,
-  schoolName:  string,
-  schoolState: string,
-  courses:     { course_name: string; category: string }[],
+  admin:        ReturnType<typeof createClient>,
+  code:         string | null,
+  schoolName:   string,
+  schoolState:  string,
+  courses:      { course_name: string; category: string }[],
+  gradingScale: GradingScale | null,
 ): Promise<Response> {
   const scraped_at = new Date().toISOString()
 
   if (code) {
     const { error } = await admin
       .from('ncaa_approved_courses_cache')
-      .upsert({ ncaa_school_code: code, school_name: schoolName, state: schoolState, courses, scraped_at },
-              { onConflict: 'ncaa_school_code' })
+      .upsert(
+        { ncaa_school_code: code, school_name: schoolName, state: schoolState,
+          courses, grading_scale: gradingScale, scraped_at },
+        { onConflict: 'ncaa_school_code' },
+      )
     if (error) console.error(`[scrape-ncaa-courses] cache upsert failed: ${error.message}`)
     else        console.log(`[scrape-ncaa-courses] cached ${courses.length} courses for ${code}`)
   }
@@ -314,6 +327,7 @@ async function cacheAndReturn(
     school_name:      schoolName,
     state:            schoolState,
     courses,
+    grading_scale:    gradingScale,
     from_cache:       false,
     scraped_at,
   })
@@ -328,7 +342,7 @@ async function getFromCache(
 ): Promise<CacheRow | null> {
   const { data } = await admin
     .from('ncaa_approved_courses_cache')
-    .select('ncaa_school_code, school_name, state, courses, scraped_at')
+    .select('ncaa_school_code, school_name, state, courses, grading_scale, scraped_at')
     .eq('ncaa_school_code', code)
     .maybeSingle()
 
@@ -387,15 +401,16 @@ async function scrapeSchool(
     return json({ status: 'not_found', fallback: true, error: msg })
   }
 
-  const courses = parseCourseList(courseHtml)
-  console.log(`[scrape-ncaa-courses] parsed ${courses.length} course(s)`)
+  const courses      = parseCourseList(courseHtml)
+  const gradingScale = parseGradingScale(courseHtml)
+  console.log(`[scrape-ncaa-courses] parsed ${courses.length} course(s), grading_scale=${gradingScale ? JSON.stringify(gradingScale) : 'none'}`)
 
   if (courses.length === 0) {
     console.warn(`[scrape-ncaa-courses] no courses found for ${code} — returning fallback`)
     return json({ status: 'not_found', fallback: true })
   }
 
-  return cacheAndReturn(admin, code, schoolName, schoolState, courses)
+  return cacheAndReturn(admin, code, schoolName, schoolState, courses, gradingScale)
 }
 
 // ── HTML parsers ──────────────────────────────────────────────────────────────
@@ -466,6 +481,50 @@ function parseCourseList(html: string): Course[] {
   }
 
   return courses
+}
+
+/**
+ * Parses the school-specific numeric grading scale from a portal course-list page.
+ *
+ * The portal has a grading period select (#hsGradingPeriodIntervalId) whose
+ * selected option value is the ID suffix of the active scale div
+ * (e.g. value="584789" → div#divId_584789). That div contains a
+ * table.dispNumericGradeTable with columns: Grade | Max | Min.
+ * We extract the Min column for A/B/C/D to build the cutoff map.
+ *
+ * Returns null if the scale section is absent (some pages omit it).
+ */
+function parseGradingScale(html: string): GradingScale | null {
+  const root = parseHtml(html)
+
+  // Find the currently-selected grading period
+  const select = root.querySelector('#hsGradingPeriodIntervalId')
+  if (!select) return null
+  const selectedOption = select.querySelector('option[selected]')
+  const periodId = selectedOption?.getAttribute('value')?.trim()
+  if (!periodId || periodId === 'showAll') return null
+
+  // Find the grading scale div for this period
+  const div = root.querySelector(`#divId_${periodId}`)
+  if (!div) return null
+
+  // Find the numeric scale table
+  const table = div.querySelector('table.dispNumericGradeTable')
+  if (!table) return null
+
+  const scale: Partial<GradingScale> = {}
+  for (const row of table.querySelectorAll('tr')) {
+    const cells = row.querySelectorAll('td')
+    if (cells.length < 3) continue
+    const grade = cells[0].text.trim().toUpperCase() as 'A' | 'B' | 'C' | 'D' | 'F'
+    const min   = parseInt(cells[2].text.trim(), 10)
+    if (['A', 'B', 'C', 'D'].includes(grade) && !isNaN(min)) {
+      scale[grade] = min
+    }
+  }
+
+  if (scale.A == null || scale.B == null || scale.C == null || scale.D == null) return null
+  return scale as GradingScale
 }
 
 // ── Utility ───────────────────────────────────────────────────────────────────
