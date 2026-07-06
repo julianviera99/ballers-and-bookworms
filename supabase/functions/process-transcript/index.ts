@@ -332,6 +332,8 @@ Deno.serve(async (req: Request) => {
 
   const systemPrompt = `You are an NCAA eligibility analyst. You will receive a high school transcript image or PDF and the NCAA-approved course list for that specific school. Extract all course data and map each course to the correct NCAA core course category.
 
+CRITICAL — NO HALLUCINATION: Extract ONLY courses that are physically printed on the transcript. Never infer, invent, duplicate, or generate course names. If a course appears once, output it exactly once. Never create alternate versions, honors variants, or AP variants of a course unless that exact text appears verbatim on the transcript. The course_name field must be copied character-for-character from the transcript — never use names from the approved list.
+
 NCAA Core Course Categories:
 - English
 - Mathematics
@@ -343,19 +345,19 @@ NCAA Core Course Categories:
 - Non-Core (PE, health, study hall, band, art, driver's ed — never counts as core)
 
 Mapping rules:
-1. Match course names against the approved list (case-insensitive, ignore punctuation and honors/AP prefixes). If matched, mark is_approved=true and use the category from the approved list.
+1. course_name: copy the course name VERBATIM from the transcript — never substitute the approved list's name. Use the approved list only to determine is_approved and mapped_category. Matching is case-insensitive; ignore punctuation and honors/AP prefixes for matching purposes only. If matched, mark is_approved=true and use the category from the approved list.
 2. If a course is NOT in the approved list, mark is_approved=false and mapped_category="Not Approved". Do NOT invent approvals.
 3. PE, Health, and other clearly non-academic courses: is_approved=false, mapped_category="Non-Core".
 4. confidence: "high"=obvious match, "medium"=inferred match, "low"=uncertain.
 5. needs_review=true if the match is uncertain OR if the grade/credit is illegible OR if the course is in-progress (no final grade yet).
 6. credit: use the value shown on the transcript. If not shown, infer 1.0 for year-long, 0.5 for semester.
 7. grade: convert to a letter grade using this exact process in order:
-   Step 1 — Determine the scale: identify what grading scale this transcript uses (e.g. 100-point numeric, letter-only, 4.0 GPA scale).
+   Step 1 — Determine the scale: identify what grading scale this transcript uses (e.g. 100-point numeric, letter-only).
    Step 2 — Use the transcript's own legend: if the transcript prints an explicit grade scale or key (e.g. a table mapping ranges to letters), use that mapping exactly.
    Step 3 — Apply the default 100-point scale: if the scale is 100-point and no legend is printed on the transcript, use exactly these cutoffs with no exceptions:
      90–100 → A | 80–89 → B | 70–79 → C | 65–69 → D | 0–64 → F
-   Step 4 — Other scales: for non-100-point scales with no legend, use your best judgment to convert to A, B, C, D, or F.
-   Do not use plus/minus variants (A-, B+, etc.) unless the transcript's own printed scale legend explicitly includes them.
+   Step 4 — Letter grades already present: if the transcript already shows letter grades (A/B/C/D/F, with or without +/-), output them as-is.
+   Do not use plus/minus variants (A-, B+, etc.) unless the transcript already shows them as letter grades.
    In-progress courses with no final grade: use "In Progress".
 8. semester: return the grade level as "9th Grade", "10th Grade", "11th Grade", or "12th Grade".
    If the transcript shows school years (e.g. "22-23") rather than grade levels, convert them:
@@ -379,7 +381,7 @@ Extract all courses from this transcript and return this exact JSON shape:
   "current_grade": "string — student's current enrollment (e.g. '12th Grade')",
   "courses": [
     {
-      "course_name": "string — exactly as shown",
+      "course_name": "string — verbatim text from the transcript, never from the approved list",
       "grade": "string — normalized letter grade or 'In Progress'",
       "credit": number,
       "semester": "string or null",
