@@ -55,14 +55,6 @@ export default function Landing() {
   }, [])
 
   async function handleSignIn() {
-    const { data: { session: currentSession } } = await supabase.auth.getSession()
-    console.log('[Landing] GitHub sign-in button clicked', {
-      method: 'supabase.auth.signInWithOAuth (provider: github)',
-      redirectTo: `${window.location.origin}/dashboard`,
-      sessionAtClickTime: currentSession
-        ? `ACTIVE — user=${currentSession.user.email} provider=${currentSession.user.app_metadata?.provider}`
-        : 'NONE — no active session',
-    })
     setSigningIn(true)
     await supabase.auth.signInWithOAuth({
       provider: 'github',
