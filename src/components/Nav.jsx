@@ -4,16 +4,25 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
 
 export default function Nav() {
-  const { isStaff } = useAuth()
+  const { session, isStaff } = useAuth()
   const navigate = useNavigate()
   const { pathname } = useLocation()
   const [open, setOpen] = useState(false)
 
   const isHome = pathname === (isStaff ? '/staff' : '/dashboard')
 
+  // Prefer GitHub username (@handle), fall back to email
+  const githubUsername = session?.user?.user_metadata?.user_name
+  const accountLabel   = githubUsername ? `@${githubUsername}` : (session?.user?.email ?? '')
+
   async function handleSignOut() {
     await supabase.auth.signOut()
-    navigate('/', { replace: true })
+    // Clear any residual Supabase auth tokens from localStorage
+    Object.keys(localStorage)
+      .filter(k => k.startsWith('sb-'))
+      .forEach(k => localStorage.removeItem(k))
+    // Full page reload — wipes all in-memory React/Supabase state
+    window.location.replace('/')
   }
 
   const linkGroups = isStaff
@@ -102,12 +111,17 @@ export default function Nav() {
             >
               Demo Guide
             </Link>
-            <button
-              onClick={handleSignOut}
-              className="text-sm font-semibold bg-brand text-black px-4 py-1.5 rounded-lg hover:bg-brand-dark transition-colors"
-            >
-              Sign out
-            </button>
+            <div className="flex items-center gap-2 pl-2 border-l border-white/20">
+              <span className="text-xs text-white/40 max-w-[160px] truncate" title={session?.user?.email}>
+                {accountLabel}
+              </span>
+              <button
+                onClick={handleSignOut}
+                className="text-sm font-semibold bg-brand text-black px-4 py-1.5 rounded-lg hover:bg-brand-dark transition-colors whitespace-nowrap"
+              >
+                Sign out
+              </button>
+            </div>
           </nav>
 
           {/* Mobile hamburger */}
@@ -158,12 +172,17 @@ export default function Nav() {
           >
             Demo Guide
           </Link>
-          <button
-            onClick={handleSignOut}
-            className="block w-full text-left py-3 text-sm text-white/70 hover:text-white"
-          >
-            Sign out
-          </button>
+          <div className="pt-3 pb-2">
+            <p className="text-xs text-white/30 truncate mb-2" title={session?.user?.email}>
+              Signed in as <span className="text-white/50">{accountLabel}</span>
+            </p>
+            <button
+              onClick={handleSignOut}
+              className="text-sm font-semibold text-white/70 hover:text-white transition-colors"
+            >
+              Sign out
+            </button>
+          </div>
         </div>
       )}
     </header>

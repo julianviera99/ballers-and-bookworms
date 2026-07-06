@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
-import { DEV_PERSONAS } from '../dev/personas'
+
+const DEV_MODE = import.meta.env.VITE_ENABLE_DEV_MODE === 'true'
 
 const FEATURES = [
   {
@@ -40,11 +41,18 @@ export default function Landing() {
   const [mode, setMode] = useState('github') // 'github' | 'dev'
   const [signingIn, setSigningIn] = useState(false)
   const [switching, setSwitching] = useState(null) // email of persona being signed into
+  const [devPersonas, setDevPersonas] = useState([])
 
   useEffect(() => {
     if (loading) return
     if (session) navigate(isStaff ? '/staff' : '/dashboard', { replace: true })
   }, [loading, session, isStaff, navigate])
+
+  useEffect(() => {
+    if (DEV_MODE) {
+      import('../dev/personas').then(m => setDevPersonas(m.DEV_PERSONAS))
+    }
+  }, [])
 
   async function handleSignIn() {
     setSigningIn(true)
@@ -124,32 +132,34 @@ export default function Landing() {
 
           <div className="space-y-5">
 
-            {/* Mode toggle */}
-            <div className="inline-flex rounded-xl border border-white/15 p-1 gap-1">
-              <button
-                onClick={() => setMode('github')}
-                className={`px-5 py-2 rounded-lg text-xs font-bold uppercase tracking-wide transition-colors ${
-                  mode === 'github'
-                    ? 'bg-white text-black'
-                    : 'text-white/50 hover:text-white'
-                }`}
-              >
-                Sign in with GitHub
-              </button>
-              <button
-                onClick={() => setMode('dev')}
-                className={`px-5 py-2 rounded-lg text-xs font-bold uppercase tracking-wide transition-colors ${
-                  mode === 'dev'
-                    ? 'bg-brand text-black'
-                    : 'text-white/50 hover:text-white'
-                }`}
-              >
-                Dev Mode
-              </button>
-            </div>
+            {/* Mode toggle — only rendered when dev mode is enabled */}
+            {DEV_MODE && (
+              <div className="inline-flex rounded-xl border border-white/15 p-1 gap-1">
+                <button
+                  onClick={() => setMode('github')}
+                  className={`px-5 py-2 rounded-lg text-xs font-bold uppercase tracking-wide transition-colors ${
+                    mode === 'github'
+                      ? 'bg-white text-black'
+                      : 'text-white/50 hover:text-white'
+                  }`}
+                >
+                  Sign in with GitHub
+                </button>
+                <button
+                  onClick={() => setMode('dev')}
+                  className={`px-5 py-2 rounded-lg text-xs font-bold uppercase tracking-wide transition-colors ${
+                    mode === 'dev'
+                      ? 'bg-brand text-black'
+                      : 'text-white/50 hover:text-white'
+                  }`}
+                >
+                  Dev Mode
+                </button>
+              </div>
+            )}
 
-            {/* GitHub sign-in */}
-            {mode === 'github' && (
+            {/* GitHub sign-in — always shown in production; shown when github tab is active in dev mode */}
+            {(!DEV_MODE || mode === 'github') && (
               <div className="flex flex-col sm:flex-row items-center gap-3">
                 <button
                   onClick={handleSignIn}
@@ -170,10 +180,10 @@ export default function Landing() {
               </div>
             )}
 
-            {/* Dev persona picker */}
-            {mode === 'dev' && (
+            {/* Dev persona picker — only rendered when dev mode is enabled and dev tab is active */}
+            {DEV_MODE && mode === 'dev' && (
               <div className="w-full max-w-sm mx-auto space-y-2 text-left">
-                {DEV_PERSONAS.map(p => {
+                {devPersonas.map(p => {
                   const isLoading = switching === p.email
                   const initials  = p.displayName.split(' ').map(n => n[0]).join('')
                   return (
