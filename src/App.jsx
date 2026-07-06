@@ -1,4 +1,5 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { ENABLE_BUDGETING, ENABLE_MENTORSHIP, ENABLE_ELIGIBILITY } from './lib/features'
 
 // Public
 import Landing     from './pages/Landing'
@@ -21,6 +22,10 @@ import MentorApplications from './pages/staff/MentorApplications'
 import MentorsList        from './pages/staff/MentorsList'
 import MentorMatches      from './pages/staff/MentorMatches'
 
+function FeatureGate({ enabled, children }) {
+  return enabled ? children : <Navigate to="/" replace />
+}
+
 export default function App() {
   return (
     <BrowserRouter>
@@ -33,10 +38,10 @@ export default function App() {
         {/* Student athlete */}
         <Route path="/dashboard"       element={<Dashboard />} />
         <Route path="/profile"         element={<Profile />} />
-        <Route path="/requests/new"    element={<NewRequest />} />
-        <Route path="/mentors/find"    element={<FindMentor />} />
-        <Route path="/mentors/matches" element={<MyMatches />} />
-        <Route path="/eligibility"     element={<Eligibility />} />
+        <Route path="/requests/new"    element={<FeatureGate enabled={ENABLE_BUDGETING}><NewRequest /></FeatureGate>} />
+        <Route path="/mentors/find"    element={<FeatureGate enabled={ENABLE_MENTORSHIP}><FindMentor /></FeatureGate>} />
+        <Route path="/mentors/matches" element={<FeatureGate enabled={ENABLE_MENTORSHIP}><MyMatches /></FeatureGate>} />
+        <Route path="/eligibility"     element={<FeatureGate enabled={ENABLE_ELIGIBILITY}><Eligibility /></FeatureGate>} />
 
         {/* Staff */}
         <Route path="/staff"                       element={<StaffDashboard />} />

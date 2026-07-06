@@ -2,6 +2,7 @@ import { Fragment, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
+import { ENABLE_BUDGETING, ENABLE_MENTORSHIP, ENABLE_ELIGIBILITY } from '../lib/features'
 
 export default function Nav() {
   const { session, isStaff } = useAuth()
@@ -47,24 +48,22 @@ export default function Nav() {
         {
           label: null,
           links: [
-            { to: '/dashboard',    label: 'Dashboard' },
-            { to: '/requests/new', label: 'New Request' },
-            { to: '/profile',      label: 'Profile' },
+            { to: '/dashboard', label: 'Dashboard' },
+            ...(ENABLE_BUDGETING ? [{ to: '/requests/new', label: 'New Request' }] : []),
+            { to: '/profile',   label: 'Profile' },
           ],
         },
-        {
+        ...(ENABLE_ELIGIBILITY ? [{
           label: 'Eligibility',
-          links: [
-            { to: '/eligibility', label: 'NCAA Eligibility' },
-          ],
-        },
-        {
+          links: [{ to: '/eligibility', label: 'NCAA Eligibility' }],
+        }] : []),
+        ...(ENABLE_MENTORSHIP ? [{
           label: 'Mentorship',
           links: [
             { to: '/mentors/find',    label: 'Find a Mentor' },
             { to: '/mentors/matches', label: 'My Matches' },
           ],
-        },
+        }] : []),
       ]
 
   return (
