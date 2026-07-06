@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
 import Nav from '../components/Nav'
 import ProtectedRoute from '../components/ProtectedRoute'
+import { ENABLE_BUDGETING } from '../lib/features'
 
 const BUDGET = 1000
 
@@ -83,20 +84,23 @@ function DashboardContent() {
               {athlete.sports?.length > 0 && ` · ${athlete.sports.join(', ')}`}
             </p>
           </div>
-          <Link
-            to="/requests/new"
-            className="self-start sm:self-auto inline-flex items-center gap-2 bg-brand hover:bg-brand-dark text-black text-sm font-bold px-5 py-2.5 rounded-xl transition-colors uppercase tracking-wide"
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-            </svg>
-            New Request
-          </Link>
+          {ENABLE_BUDGETING && (
+            <Link
+              to="/requests/new"
+              className="self-start sm:self-auto inline-flex items-center gap-2 bg-brand hover:bg-brand-dark text-black text-sm font-bold px-5 py-2.5 rounded-xl transition-colors uppercase tracking-wide"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+              </svg>
+              New Request
+            </Link>
+          )}
         </div>
       </div>
 
       <main className="max-w-4xl mx-auto px-4 sm:px-6 py-8 space-y-6">
 
+        {ENABLE_BUDGETING && (<>
         {/* Budget card */}
         <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
           <div className="bg-black px-6 py-4 flex items-center justify-between">
@@ -211,6 +215,7 @@ function DashboardContent() {
             </>
           )}
         </div>
+        </>)}
 
       </main>
     </div>
