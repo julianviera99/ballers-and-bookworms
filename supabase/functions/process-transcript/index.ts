@@ -62,14 +62,11 @@ const CLAUDE_TIMEOUT_QUICK = 20_000   // 20s for the school-name extraction pass
 const CLAUDE_TIMEOUT_FULL  = 60_000   // 60s for the full extraction + mapping pass
 const ANTHROPIC_API        = 'https://api.anthropic.com/v1/messages'
 
-// Grade letter → quality points
-const GRADE_POINTS: Record<string, number> = {
-  'A+': 4, A: 4, 'A-': 3.7,
-  'B+': 3.3, B: 3, 'B-': 2.7,
-  'C+': 2.3, C: 2, 'C-': 1.7,
-  'D+': 1.3, D: 1, 'D-': 0.7,
-  F: 0,
-}
+// NCAA core-course GPA scale — simple 5-level, no +/- variants
+const GRADE_POINTS: Record<string, number> = { A: 4, B: 3, C: 2, D: 1, F: 0 }
+
+// Standard NCAA numeric cutoffs used when the portal has no school-specific scale
+const DEFAULT_GRADE_SCALE = { A: 90, B: 80, C: 70, D: 65 }
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -88,6 +85,20 @@ interface ExtractedCourse {
   quality_points:   number
   confidence:       'high' | 'medium' | 'low'
   needs_review:     boolean
+}
+
+interface GradingScale {
+  A: number
+  B: number
+  C: number
+  D: number
+}
+
+interface RawCourse {
+  course_name: string
+  raw_grade:   string        // exactly as printed on transcript
+  raw_credit:  number        // exactly as printed on transcript
+  semester:    string | null
 }
 
 interface DiResult {
@@ -260,6 +271,7 @@ Deno.serve(async (req: Request) => {
   let resolvedSchoolCode: string | null = knownCode ?? null
   let resolvedSchoolName  = extractedSchoolName
   let resolvedSchoolState = extractedSchoolState
+  let gradingScale: GradingScale | null = null
 
   try {
     console.log(`[process-transcript] looking up NCAA courses for "${extractedSchoolName}" (${extractedSchoolState})...`)
@@ -291,7 +303,8 @@ Deno.serve(async (req: Request) => {
       resolvedSchoolCode = scrapeData.ncaa_school_code
       resolvedSchoolName = scrapeData.school_name  ?? extractedSchoolName
       resolvedSchoolState= scrapeData.state        ?? extractedSchoolState
-      console.log(`[process-transcript] loaded ${approvedCourses.length} approved courses for ${resolvedSchoolName}`)
+      gradingScale       = scrapeData.grading_scale ?? null
+      console.log(`[process-transcript] loaded ${approvedCourses.length} approved courses for ${resolvedSchoolName}, grading_scale=${gradingScale ? JSON.stringify(gradingScale) : 'standard'}`)
     } else {
       // not_found — continue with empty list; mapping will mark all as Not Approved
       console.warn(`[process-transcript] school not found on NCAA portal; proceeding without approved list`)
@@ -322,73 +335,40 @@ Deno.serve(async (req: Request) => {
   // ── DIAG: approved course list ────────────────────────────────────────
   console.log(`[DIAG] approved_list_available=${approvedCourses.length > 0} count=${approvedCourses.length}`)
   if (approvedCourses.length > 0) {
-    console.log('[DIAG] approved courses sent to Claude:')
+    console.log('[DIAG] approved courses loaded:')
     approvedCourses.forEach((c, i) => console.log(`  [DIAG]  ${i + 1}. ${c.course_name} (${c.category})`))
   }
 
-  const approvedCourseText = approvedCourses.length > 0
-    ? approvedCourses.map(c => `  - ${c.course_name} (${c.category})`).join('\n')
-    : '  (No approved course list available — mark all courses as Not Approved unless they are clearly non-core like PE or Health)'
+  const systemPrompt = `You are reading a high school transcript. Extract raw course data exactly as printed.
 
-  const systemPrompt = `You are an NCAA eligibility analyst. You will receive a high school transcript image or PDF and the NCAA-approved course list for that specific school. Extract all course data and map each course to the correct NCAA core course category.
+CRITICAL — NO HALLUCINATION: Extract ONLY courses physically printed on the transcript. Never infer, invent, or duplicate entries. Each course row becomes exactly one entry. Never create honors/AP variants of a course name unless that exact text appears verbatim.
 
-CRITICAL — NO HALLUCINATION: Extract ONLY courses that are physically printed on the transcript. Never infer, invent, duplicate, or generate course names. If a course appears once, output it exactly once. Never create alternate versions, honors variants, or AP variants of a course unless that exact text appears verbatim on the transcript. The course_name field must be copied character-for-character from the transcript — never use names from the approved list.
-
-NCAA Core Course Categories:
-- English
-- Mathematics
-- Natural/Physical Science
-- Social Science
-- Foreign Language/Comparative Religion and Philosophy
-- Additional Academic (core-eligible courses beyond the required minimums, or extra years in a core subject)
-- Not Approved (appears on transcript but is NOT in the approved list below)
-- Non-Core (PE, health, study hall, band, art, driver's ed — never counts as core)
-
-Mapping rules:
-1. course_name: copy the course name VERBATIM from the transcript — never substitute the approved list's name. Use the approved list only to determine is_approved and mapped_category. Matching is case-insensitive; ignore punctuation and honors/AP prefixes for matching purposes only. If matched, mark is_approved=true and use the category from the approved list.
-2. If a course is NOT in the approved list, mark is_approved=false and mapped_category="Not Approved". Do NOT invent approvals.
-3. PE, Health, and other clearly non-academic courses: is_approved=false, mapped_category="Non-Core".
-4. confidence: "high"=obvious match, "medium"=inferred match, "low"=uncertain.
-5. needs_review=true if the match is uncertain OR if the grade/credit is illegible OR if the course is in-progress (no final grade yet).
-6. credit: use the value shown on the transcript. If not shown, infer 1.0 for year-long, 0.5 for semester.
-7. grade: convert to a letter grade using this exact process in order:
-   Step 1 — Determine the scale: identify what grading scale this transcript uses (e.g. 100-point numeric, letter-only).
-   Step 2 — Use the transcript's own legend: if the transcript prints an explicit grade scale or key (e.g. a table mapping ranges to letters), use that mapping exactly.
-   Step 3 — Apply the default 100-point scale: if the scale is 100-point and no legend is printed on the transcript, use exactly these cutoffs with no exceptions:
-     90–100 → A | 80–89 → B | 70–79 → C | 65–69 → D | 0–64 → F
-   Step 4 — Letter grades already present: if the transcript already shows letter grades (A/B/C/D/F, with or without +/-), output them as-is.
-   Do not use plus/minus variants (A-, B+, etc.) unless the transcript already shows them as letter grades.
-   In-progress courses with no final grade: use "In Progress".
-8. semester: return the grade level as "9th Grade", "10th Grade", "11th Grade", or "12th Grade".
-   If the transcript shows school years (e.g. "22-23") rather than grade levels, convert them:
-   use the student's current grade as the anchor for the most recent completed year, then count back.
-   For example, if the student is currently in 12th grade and "25-26" is the current year,
-   then "24-25" = 11th Grade, "23-24" = 10th Grade, "22-23" = 9th Grade.
-   If the term (fall/spring) is also shown, append it: "10th Grade Fall".
-   If the grade level cannot be determined, return null.
+Fields to extract:
+- high_school_name: as shown on the transcript header
+- high_school_state: 2-letter state code
+- current_grade: student's current enrollment (e.g. "12th Grade")
+- credit_scale: examine the credit values printed. If credits are decimals or at most 1.5 (e.g., 0.5, 1.0), use "carnegie". If credits are larger integers like 2.5, 5, 10, use "nj_5point". If unsure, use "carnegie".
+- courses: one entry per course row on the transcript:
+  - course_name: the exact course name verbatim as printed — do not modify, abbreviate, or expand
+  - raw_grade: the grade EXACTLY as printed (e.g. "87", "93.5", "B+", "A", "In Progress") — DO NOT convert
+  - raw_credit: the credit value as a number exactly as printed (e.g. 1.0, 0.5, 5) — DO NOT convert
+  - semester: grade level as "9th Grade", "10th Grade", "11th Grade", or "12th Grade". If term is shown, append it: "10th Grade Fall". If school years shown (e.g. "22-23"), convert using current_grade as anchor: if student is 12th grade and "25-26" is current year, then "24-25"=11th Grade, "23-24"=10th Grade, etc. Null if cannot be determined.
 
 Always respond with valid JSON only — no prose, no markdown fences.`
 
-  const userPrompt = `NCAA-approved course list for ${resolvedSchoolName} (${resolvedSchoolState}):
-
-${approvedCourseText}
-
-Extract all courses from this transcript and return this exact JSON shape:
+  const userPrompt = `Extract all courses from this transcript and return this exact JSON shape:
 
 {
-  "high_school_name": "string — as shown on transcript",
-  "high_school_state": "string — 2-letter code",
-  "current_grade": "string — student's current enrollment (e.g. '12th Grade')",
+  "high_school_name": "string",
+  "high_school_state": "string",
+  "current_grade": "string",
+  "credit_scale": "carnegie" | "nj_5point" | "other",
   "courses": [
     {
-      "course_name": "string — verbatim text from the transcript, never from the approved list",
-      "grade": "string — normalized letter grade or 'In Progress'",
-      "credit": number,
-      "semester": "string or null",
-      "mapped_category": "string — one of the 8 categories above",
-      "is_approved": boolean,
-      "confidence": "high" | "medium" | "low",
-      "needs_review": boolean
+      "course_name": "verbatim text from transcript",
+      "raw_grade": "exactly as printed (e.g. '87', 'B+', 'A', 'In Progress')",
+      "raw_credit": number,
+      "semester": "string or null"
     }
   ]
 }`
@@ -420,16 +400,8 @@ Extract all courses from this transcript and return this exact JSON shape:
     high_school_name:  string
     high_school_state: string
     current_grade:     string
-    courses: Array<{
-      course_name:     string
-      grade:           string
-      credit:          number
-      semester:        string | null
-      mapped_category: string
-      is_approved:     boolean
-      confidence:      'high' | 'medium' | 'low'
-      needs_review:    boolean
-    }>
+    credit_scale?:     string
+    courses:           RawCourse[]
   }
 
   try {
@@ -441,44 +413,104 @@ Extract all courses from this transcript and return this exact JSON shape:
     return json({ error: 'Failed to parse transcript analysis response' }, 500)
   }
 
-  // ── DIAG: courses Claude identified ──────────────────────────────────
-  console.log(`[DIAG] Claude identified ${parsed.courses.length} courses:`)
+  // ── DIAG: raw courses Claude extracted ───────────────────────────────────
+  console.log(`[DIAG] Claude extracted ${parsed.courses.length} courses (credit_scale=${parsed.credit_scale ?? 'carnegie'}):`)
   parsed.courses.forEach((c, i) => {
-    console.log(`  [DIAG]  ${i + 1}. "${c.course_name}" | category="${c.mapped_category}" | approved=${c.is_approved} | confidence=${c.confidence} | grade=${c.grade} | credit=${c.credit} | semester=${c.semester}`)
+    console.log(`  [DIAG]  ${i + 1}. "${c.course_name}" | raw_grade="${c.raw_grade}" | raw_credit=${c.raw_credit} | semester=${c.semester}`)
   })
 
-  // ── DIAG: per-course approved-list comparison ─────────────────────────
-  // For each course Claude marked not-approved or non-core, show which
-  // approved courses (if any) have overlapping tokens — purely informational.
-  if (approvedCourses.length > 0) {
-    console.log('[DIAG] approved-list match check for non-approved courses:')
-    const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim()
-    parsed.courses
-      .filter(c => !c.is_approved)
-      .forEach(c => {
-        const tokens = normalize(c.course_name).split(/\s+/).filter(t => t.length > 2)
-        const candidates = approvedCourses
-          .map(a => ({ name: a.course_name, cat: a.category, score: tokens.filter(t => normalize(a.course_name).includes(t)).length }))
-          .filter(a => a.score > 0)
-          .sort((a, b) => b.score - a.score)
-          .slice(0, 3)
-        if (candidates.length > 0) {
-          console.log(`  [DIAG]  "${c.course_name}" closest approved matches:`)
-          candidates.forEach(a => console.log(`    [DIAG]    score=${a.score} "${a.name}" (${a.cat})`))
-        } else {
-          console.log(`  [DIAG]  "${c.course_name}" — no token overlap with any approved course`)
-        }
-      })
+  // ── Code-based approved list matching + grade conversion + GPA ────────────
+  // Deterministic: no Claude involvement in any of these calculations.
+
+  // Detect credit scale from data distribution (overrides Claude's reported scale)
+  const rawCreditSample = parsed.courses
+    .map(c => typeof c.raw_credit === 'number' ? c.raw_credit : parseFloat(String(c.raw_credit)))
+    .filter(n => !isNaN(n) && n > 0)
+  const medianCredit = rawCreditSample.length > 0
+    ? [...rawCreditSample].sort((a, b) => a - b)[Math.floor(rawCreditSample.length / 2)]
+    : 0
+  const creditScale = medianCredit > 2 ? 'nj_5point' : 'carnegie'
+  console.log(`[process-transcript] credit_scale detected=${creditScale} (median raw credit=${medianCredit}, Claude reported=${parsed.credit_scale ?? 'none'})`)
+
+  // ── Three-tier course matching ──────────────────────────────────────────────
+
+  // Tier 1 + 2: synchronous, deterministic — run for every course
+  const tier12Results = parsed.courses.map(c => matchTiers12(c.course_name, approvedCourses))
+
+  // Tier 3: Claude semantic match — only for courses that failed Tiers 1+2
+  const tier3Needed = parsed.courses
+    .map((c, i) => (tier12Results[i] === null ? c.course_name : null))
+    .filter((n): n is string => n !== null)
+
+  const tier3Map = new Map<string, ApprovedCourse | null>()
+  if (tier3Needed.length > 0 && approvedCourses.length > 0) {
+    console.log(`[process-transcript] Tier 3: ${tier3Needed.length} unmatched course(s) → Claude`)
+    try {
+      const t3 = await matchTier3(ANTHROPIC_API_KEY, tier3Needed, approvedCourses)
+      for (const [name, course] of t3) tier3Map.set(name, course)
+    } catch (e) {
+      console.warn(`[process-transcript] Tier 3 failed: ${(e as Error).message}`)
+      for (const name of tier3Needed) tier3Map.set(name, null)
+    }
   }
 
-  // ── Calculate quality points and GPA ──────────────────────────────────
+  // ── Build final course list ─────────────────────────────────────────────────
 
-  const extractedCourses: ExtractedCourse[] = parsed.courses.map(c => {
-    const gradeVal   = GRADE_POINTS[c.grade] ?? GRADE_POINTS[c.grade?.toUpperCase()] ?? null
-    const isGraded   = gradeVal !== null
-    const credit     = isGraded ? c.credit : 0
-    const qualityPts = c.is_approved && isGraded ? parseFloat((credit * gradeVal).toFixed(2)) : 0
-    return { ...c, credit, quality_points: qualityPts }
+  const extractedCourses: ExtractedCourse[] = parsed.courses.map((c, idx) => {
+    // ── 1. Approval + category from three-tier matching ────────────────────────
+    const t12 = tier12Results[idx]
+    const t3  = tier3Map.get(c.course_name)
+
+    let is_approved:    boolean
+    let mapped_category: string
+    let confidence:     'high' | 'medium' | 'low'
+    let needs_review:   boolean
+
+    if (t12) {
+      is_approved    = true
+      mapped_category = t12.course.category
+      confidence     = t12.tier === 1 ? 'high' : 'medium'
+      needs_review   = false
+    } else if (t3) {
+      is_approved    = true
+      mapped_category = t3.category
+      confidence     = 'low'
+      needs_review   = true
+    } else {
+      is_approved    = false
+      mapped_category = isNonCore(c.course_name) ? 'Non-Core' : 'Not Approved'
+      confidence     = 'high'
+      needs_review   = false
+    }
+
+    // ── 2. Grade parsing (deterministic code) ──────────────────────────────────
+    const letter   = parseGrade(c.raw_grade, gradingScale)
+    const isGraded = letter !== null && letter !== 'In Progress'
+    const grade    = letter ?? c.raw_grade
+
+    // ── 3. Credit normalization (deterministic code) ───────────────────────────
+    const creditRaw = typeof c.raw_credit === 'number' ? c.raw_credit : parseFloat(String(c.raw_credit)) || 0
+    const credit    = isGraded ? normCredit(creditRaw, creditScale) : 0
+
+    // ── 4. Quality points (deterministic code) ─────────────────────────────────
+    const gradeVal       = isGraded ? (GRADE_POINTS[letter!] ?? null) : null
+    const quality_points = is_approved && gradeVal !== null
+      ? parseFloat((credit * gradeVal).toFixed(2))
+      : 0
+
+    console.log(`  [process-transcript] "${c.course_name}" grade="${grade}" credit=${credit} tier=${t12 ? t12.tier : (t3 ? 3 : '-')} cat="${mapped_category}" qp=${quality_points}`)
+
+    return {
+      course_name:     c.course_name,
+      grade,
+      credit,
+      semester:        c.semester ?? null,
+      mapped_category,
+      is_approved,
+      quality_points,
+      confidence,
+      needs_review,
+    }
   })
 
   const approvedOnly       = extractedCourses.filter(c => c.is_approved)
@@ -632,6 +664,212 @@ Extract all courses from this transcript and return this exact JSON shape:
   })
 })
 
+// ── Course-matching helpers ────────────────────────────────────────────────
+
+/**
+ * Normalize a course name for Tier 1 exact matching.
+ * Pipeline: lowercase → abbreviation expansion → punctuation removal →
+ *           noise-word removal → Roman-numeral conversion →
+ *           prefix-word stripping → whitespace normalization.
+ */
+function normalizeTier1(s: string): string {
+  let n = s.toLowerCase()
+
+  // Expand common transcript abbreviations (whole-word only)
+  n = n.replace(/\bhist\b/g,  'history')
+  n = n.replace(/\blit\b/g,   'literature')
+  n = n.replace(/\bsci\b/g,   'science')
+  n = n.replace(/\beng\b/g,   'english')
+  n = n.replace(/\bhon\b/g,   'honors')
+  n = n.replace(/\bmath\b/g,  'mathematics')
+
+  // Remove all punctuation (& / - etc. → space)
+  n = n.replace(/[^a-z0-9\s]/g, ' ')
+
+  // Strip noise words — treat "and" the same as "&" was already treated
+  n = n.replace(/\b(and|or|the|a|an|of|in|to)\b/g, ' ')
+
+  // Convert Roman numerals (standalone tokens, I–X)
+  n = n.replace(/\bx\b/g,    '10')
+  n = n.replace(/\bix\b/g,   '9')
+  n = n.replace(/\bviii\b/g, '8')
+  n = n.replace(/\bvii\b/g,  '7')
+  n = n.replace(/\bvi\b/g,   '6')
+  n = n.replace(/\bv\b/g,    '5')
+  n = n.replace(/\biv\b/g,   '4')
+  n = n.replace(/\biii\b/g,  '3')
+  n = n.replace(/\bii\b/g,   '2')
+  n = n.replace(/\bi\b/g,    '1')
+
+  // Strip honors/level prefix words
+  n = n.replace(/\b(ap|ib|honors?|advanced\s*placement|advanced|cp|college\s*prep|survey|intro(?:duction)?(?:\s+to)?)\b/g, ' ')
+
+  return n.replace(/\s+/g, ' ').trim()
+}
+
+/** Keyword patterns that identify non-core courses (PE, health, arts, etc.). */
+const NON_CORE_PATTERNS = [
+  'physical education', 'phys ed', 'gym ', 'gymnasium', 'health',
+  'band', 'chorus', 'choir', 'orchestra', 'fine art', 'visual art', 'studio art',
+  "driver's ed", 'drivers ed', 'driving', 'study hall', 'homeroom',
+  'advisory', 'lunch', 'free period', 'career education', 'vocational',
+  'keyboarding', 'typing', 'computer applications',
+]
+
+function isNonCore(name: string): boolean {
+  const lower = ` ${name.toLowerCase()} `
+  return NON_CORE_PATTERNS.some(p => lower.includes(p))
+}
+
+/** Levenshtein edit distance between two strings. */
+function levenshtein(a: string, b: string): number {
+  const m = a.length, n = b.length
+  if (m === 0) return n
+  if (n === 0) return m
+  const dp: number[] = Array.from({ length: n + 1 }, (_, i) => i)
+  for (let i = 1; i <= m; i++) {
+    let prev = dp[0]
+    dp[0] = i
+    for (let j = 1; j <= n; j++) {
+      const temp = dp[j]
+      dp[j] = a[i - 1] === b[j - 1] ? prev : 1 + Math.min(prev, dp[j], dp[j - 1])
+      prev = temp
+    }
+  }
+  return dp[n]
+}
+
+/** Similarity in [0, 1]: 1 – (levenshtein / maxLength). */
+function stringSimilarity(a: string, b: string): number {
+  const maxLen = Math.max(a.length, b.length)
+  return maxLen === 0 ? 1 : 1 - levenshtein(a, b) / maxLen
+}
+
+/**
+ * Tier 1 + 2 matching — synchronous and deterministic.
+ *   Tier 1: exact match on normalizeTier1 forms → confidence "high", no needs_review
+ *   Tier 2: best Levenshtein similarity ≥ 85% on Tier1 forms → confidence "medium", no needs_review
+ */
+function matchTiers12(
+  courseName:   string,
+  approvedList: ApprovedCourse[],
+): { course: ApprovedCourse; tier: 1 | 2 } | null {
+  if (approvedList.length === 0) return null
+  const norm = normalizeTier1(courseName)
+  if (!norm) return null
+
+  // Tier 1: exact
+  for (const a of approvedList) {
+    if (normalizeTier1(a.course_name) === norm) return { course: a, tier: 1 }
+  }
+
+  // Tier 2: best fuzzy match ≥ 85%
+  let best: { course: ApprovedCourse; sim: number } | null = null
+  for (const a of approvedList) {
+    const sim = stringSimilarity(norm, normalizeTier1(a.course_name))
+    if (sim >= 0.85 && (!best || sim > best.sim)) best = { course: a, sim }
+  }
+  if (best) return { course: best.course, tier: 2 }
+
+  return null
+}
+
+/**
+ * Tier 3 — Claude semantic match for courses that failed Tiers 1+2.
+ * All unmatched names are sent in a single temperature=0 call.
+ * Returns a Map of transcript name → matched ApprovedCourse (or null).
+ */
+async function matchTier3(
+  apiKey:         string,
+  unmatched:      string[],
+  approvedList:   ApprovedCourse[],
+): Promise<Map<string, ApprovedCourse | null>> {
+  const result = new Map<string, ApprovedCourse | null>()
+
+  const listText = approvedList
+    .map((c, i) => `${i + 1}. ${c.course_name} (${c.category})`)
+    .join('\n')
+
+  const system = `You are matching high school transcript course names to a school's NCAA-approved course list.
+For each transcript course, find the matching approved course if one exists — accounting for abbreviations, alternate spellings, punctuation differences, and Roman vs Arabic numerals.
+Only match if you are confident they refer to the same academic course.
+Respond with valid JSON only — no prose, no markdown fences.`
+
+  const user = `NCAA-approved courses:
+${listText}
+
+For each transcript course below, find its best match from the approved list above, or null if none exists.
+
+Transcript courses:
+${unmatched.map((n, i) => `${i + 1}. "${n}"`).join('\n')}
+
+Return exactly this JSON shape:
+{
+  "matches": [
+    { "transcript_name": "...", "matched_approved_name": "exact name from list above, or null" }
+  ]
+}`
+
+  const raw = await claudeCall(apiKey, 30_000, system, [{ type: 'text', text: user }], 1024, 0)
+  const cleaned = raw.replace(/^```json\s*/i, '').replace(/```\s*$/, '').trim()
+
+  let parsed: { matches: Array<{ transcript_name: string; matched_approved_name: string | null }> }
+  try {
+    parsed = JSON.parse(cleaned)
+  } catch {
+    console.error('[process-transcript] Tier 3 JSON parse failed:', raw.slice(0, 300))
+    for (const name of unmatched) result.set(name, null)
+    return result
+  }
+
+  const byName = new Map(approvedList.map(c => [c.course_name, c]))
+  for (const m of parsed.matches ?? []) {
+    const course = m.matched_approved_name ? (byName.get(m.matched_approved_name) ?? null) : null
+    result.set(m.transcript_name, course)
+  }
+  // Fill any names Claude omitted
+  for (const name of unmatched) {
+    if (!result.has(name)) result.set(name, null)
+  }
+
+  return result
+}
+
+/**
+ * Parse any raw grade string → standard letter (A/B/C/D/F), "In Progress", or null.
+ * Numeric grades use the school-specific scale from the NCAA portal when available,
+ * otherwise falls back to DEFAULT_GRADE_SCALE (90/80/70/65).
+ * Plus/minus variants are collapsed to the base letter (A+/A- → A, B+/B- → B, etc.).
+ */
+function parseGrade(raw: string, scale?: GradingScale | null): string | null {
+  if (!raw) return null
+  const s     = raw.trim()
+  const upper = s.toUpperCase()
+
+  if (['IN PROGRESS', 'IP', 'INC', 'INCOMPLETE', 'P'].includes(upper)) return 'In Progress'
+
+  // Letter grade with optional +/-
+  if (/^[ABCDF][+-]?$/.test(upper)) return upper[0]  // strip +/-
+
+  // Numeric (100-point or percentage) — use school-specific cutoffs or standard fallback
+  const num = parseFloat(s.replace('%', ''))
+  if (!isNaN(num) && num >= 0 && num <= 100) {
+    const A = scale?.A ?? DEFAULT_GRADE_SCALE.A
+    const B = scale?.B ?? DEFAULT_GRADE_SCALE.B
+    const C = scale?.C ?? DEFAULT_GRADE_SCALE.C
+    const D = scale?.D ?? DEFAULT_GRADE_SCALE.D
+    return num >= A ? 'A' : num >= B ? 'B' : num >= C ? 'C' : num >= D ? 'D' : 'F'
+  }
+
+  return null  // unrecognized — will be treated as ungraded
+}
+
+/** Convert raw credit value to Carnegie units if the transcript uses another scale. */
+function normCredit(raw: number, scale: string): number {
+  if (scale === 'nj_5point') return parseFloat((raw / 5).toFixed(2))
+  return raw
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /**
@@ -644,7 +882,7 @@ async function claudeCall(
   system:     string,
   content:    unknown[],
   maxTokens:  number,
-  temperature = 1,
+  temperature = 0,
 ): Promise<string> {
   const ctl = new AbortController()
   const t   = setTimeout(() => ctl.abort(), timeoutMs)
