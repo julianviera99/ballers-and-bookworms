@@ -1,21 +1,20 @@
 /**
  * scrape-ncaa-courses — Supabase Edge Function
  *
- * Finds a high school's NCAA-approved course list from the NCAA HS Portal.
+ * Pure HTTP scraper: fetches a school's NCAA-approved course list and grading
+ * scale from the NCAA HS Portal. All DB persistence is handled by the caller
+ * (staff UI writes results to ncaa_schools; transcript processing reads from there).
  *
  * Request body:
- *   { high_school_name: string, state: string, ncaa_school_code?: string }
- *   - ncaa_school_code: if already known (e.g. user selected from a previous
- *     multiple_matches response), skip the search step entirely.
+ *   { high_school_name: string, state: string, ncaa_school_code?: string, ceeb_code?: string }
+ *   - ncaa_school_code: if already known (e.g. staff selected from a multiple_matches list),
+ *     skip the search step and fetch courses directly.
+ *   - ceeb_code: tried first before name+state search; globally unique so often resolves directly.
  *
  * Response shapes:
- *   { status: 'found',            ncaa_school_code, school_name, state, courses, from_cache, scraped_at }
+ *   { status: 'found',            ncaa_school_code, school_name, state, courses, grading_scale, scraped_at }
  *   { status: 'multiple_matches', schools: [{ ncaa_school_code, name, city, state }] }
  *   { status: 'not_found',        fallback: true }
- *
- * Caches results in ncaa_approved_courses_cache for 30 days.
- * Written only via service_role — no extra secrets required beyond the
- * auto-injected SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, SUPABASE_ANON_KEY.
  *
  * NCAA Portal flow (discovered by inspecting live browser traffic):
  *   1. GET  https://web3.ncaa.org/hsportal/exec/hsAction?hsActionSubmit=searchHighSchool
@@ -41,13 +40,10 @@ const CORS = {
   'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
 }
 
-// GET this URL to establish a JSESSIONID session cookie before searching
 const NCAA_SESSION_URL = 'https://web3.ncaa.org/hsportal/exec/hsAction?hsActionSubmit=searchHighSchool'
-// All POST actions go to this base URL (action is specified in the POST body)
 const NCAA_ACTION_URL  = 'https://web3.ncaa.org/hsportal/exec/hsAction'
 
-const CACHE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000   // 30 days
-const SCRAPE_TIMEOUT   = 20_000                        // 20 s per outbound fetch
+const SCRAPE_TIMEOUT = 20_000
 
 const BROWSER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
 
@@ -65,7 +61,6 @@ const POST_HEADERS = {
   'Origin':       'https://web3.ncaa.org',
 }
 
-// NCAA category numbers → standard labels
 const CATEGORY_BY_NUM: Record<string, string> = {
   '1': 'English',
   '2': 'Social Science',
@@ -95,15 +90,6 @@ interface GradingScale {
   D: number
 }
 
-interface CacheRow {
-  ncaa_school_code: string
-  school_name:      string
-  state:            string
-  courses:          Course[]
-  grading_scale:    GradingScale | null
-  scraped_at:       string
-}
-
 // ── Handler ──────────────────────────────────────────────────────────────────
 
 Deno.serve(async (req: Request) => {
@@ -115,19 +101,14 @@ Deno.serve(async (req: Request) => {
   const authHeader = req.headers.get('Authorization')
   if (!authHeader) return json({ error: 'Missing Authorization header' }, 401)
 
-  const SUPABASE_URL              = Deno.env.get('SUPABASE_URL')!
-  const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-  const SUPABASE_ANON_KEY         = Deno.env.get('SUPABASE_ANON_KEY')!
+  const SUPABASE_URL      = Deno.env.get('SUPABASE_URL')!
+  const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')!
 
   const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     global: { headers: { Authorization: authHeader } },
   })
   const { data: { user }, error: authErr } = await userClient.auth.getUser()
   if (authErr || !user) return json({ error: 'Unauthorized' }, 401)
-
-  const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
-    auth: { autoRefreshToken: false, persistSession: false },
-  })
 
   // ── Parse body ─────────────────────────────────────────────────────────
 
@@ -139,14 +120,11 @@ Deno.serve(async (req: Request) => {
   if (!state?.trim())            return json({ error: 'state is required' }, 400)
 
   const schoolState = state.trim().toUpperCase()
-  // Normalise to string — Claude occasionally returns the CEEB code as a number
   const ceebCodeStr = ceeb_code != null ? String(ceeb_code).trim() : ''
   console.log(`[scrape-ncaa-courses] name="${high_school_name}", state="${schoolState}", code="${ncaa_school_code ?? 'none'}", ceeb="${ceebCodeStr || 'none'}"`)
 
   // ── Establish browser session ──────────────────────────────────────────
-  // GET the search form page to get a JSESSIONID that the portal will accept
-  // on subsequent POST requests. GETting the homepage is not sufficient —
-  // the search form page sets its own session context.
+
   let sessionCookie = ''
   try {
     const ctl = new AbortController()
@@ -160,7 +138,6 @@ Deno.serve(async (req: Request) => {
       })
       const raw = res.headers.get('set-cookie') ?? ''
       if (raw) {
-        // Deno collapses multiple Set-Cookie headers into one comma-joined string
         sessionCookie = raw
           .split(/,(?=[^;]+=[^;])/)
           .map(c => c.split(';')[0].trim())
@@ -180,19 +157,10 @@ Deno.serve(async (req: Request) => {
   // ── Fast path: school code already known ──────────────────────────────
 
   if (ncaa_school_code?.trim()) {
-    const code   = ncaa_school_code.trim()
-    const cached = await getFromCache(admin, code)
-    if (cached) {
-      console.log(`[scrape-ncaa-courses] cache hit for ${code}`)
-      return json({ status: 'found', ...cached, from_cache: true })
-    }
-    return scrapeSchool(admin, code, high_school_name.trim(), schoolState, sessionCookie)
+    return scrapeSchool(ncaa_school_code.trim(), high_school_name.trim(), schoolState, sessionCookie)
   }
 
   // ── Search NCAA portal ─────────────────────────────────────────────────
-  // The search form's submit button has name="hsActionSubmit" value="Search".
-  // That value must appear in the POST body — putting it in the URL query
-  // string only navigates to the form, it does not process a search.
 
   async function doSearch(params: Record<string, string>): Promise<string> {
     const formBody = new URLSearchParams({
@@ -222,7 +190,6 @@ Deno.serve(async (req: Request) => {
     }
   }
 
-  // Strip common school-name suffixes that the NCAA portal omits
   function stripSchoolSuffix(name: string): string {
     return name
       .replace(/\s+high\s+school$/i, '')
@@ -231,20 +198,25 @@ Deno.serve(async (req: Request) => {
       .trim()
   }
 
-  // 1. Try CEEB code first — globally unique, and when it matches exactly one
-  //    school the portal returns the course list directly (no select-school step).
+  // 1. Try CEEB code first — globally unique; portal often returns courses directly
   if (ceebCodeStr) {
     console.log(`[scrape-ncaa-courses] searching by CEEB code ${ceebCodeStr}...`)
     try {
       const html    = await doSearch({ ceebCode: ceebCodeStr })
       const courses = parseCourseList(html)
       if (courses.length > 0) {
-        // Portal resolved the CEEB to one school and returned its course list directly
         console.log(`[scrape-ncaa-courses] CEEB search returned ${courses.length} courses directly`)
         const gradingScale = parseGradingScale(html)
-        return cacheAndReturn(admin, null, high_school_name.trim(), schoolState, courses, gradingScale)
+        return json({
+          status:           'found',
+          ncaa_school_code: null,
+          school_name:      high_school_name.trim(),
+          state:            schoolState,
+          courses,
+          grading_scale:    gradingScale,
+          scraped_at:       new Date().toISOString(),
+        })
       }
-      // If no course tables, fall through — may have returned #selectHsFormTable
       console.log('[scrape-ncaa-courses] CEEB search returned no course tables; falling back to name search')
     } catch (e) {
       console.warn(`[scrape-ncaa-courses] CEEB search failed: ${(e as Error).message}`)
@@ -281,88 +253,17 @@ Deno.serve(async (req: Request) => {
     return json({ status: 'multiple_matches', schools })
   }
 
-  // Single name-search match — check cache then fetch course list
   const school = schools[0]
-  const cached = await getFromCache(admin, school.ncaa_school_code)
-  if (cached) {
-    console.log(`[scrape-ncaa-courses] cache hit for ${school.ncaa_school_code}`)
-    return json({ status: 'found', ...cached, from_cache: true })
-  }
-
-  return scrapeSchool(admin, school.ncaa_school_code, school.name, school.state, sessionCookie)
+  return scrapeSchool(school.ncaa_school_code, school.name, school.state, sessionCookie)
 })
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /**
- * Saves courses + grading scale to cache and returns the found response.
- * Used when the CEEB search returns courses directly (no separate hsCode step).
- * ncaa_school_code is null because the portal didn't give us the internal code.
- */
-async function cacheAndReturn(
-  admin:        ReturnType<typeof createClient>,
-  code:         string | null,
-  schoolName:   string,
-  schoolState:  string,
-  courses:      { course_name: string; category: string }[],
-  gradingScale: GradingScale | null,
-): Promise<Response> {
-  const scraped_at = new Date().toISOString()
-
-  if (code) {
-    const { error } = await admin
-      .from('ncaa_approved_courses_cache')
-      .upsert(
-        { ncaa_school_code: code, school_name: schoolName, state: schoolState,
-          courses, grading_scale: gradingScale, scraped_at },
-        { onConflict: 'ncaa_school_code' },
-      )
-    if (error) console.error(`[scrape-ncaa-courses] cache upsert failed: ${error.message}`)
-    else        console.log(`[scrape-ncaa-courses] cached ${courses.length} courses for ${code}`)
-  }
-
-  return json({
-    status:           'found',
-    ncaa_school_code: code,
-    school_name:      schoolName,
-    state:            schoolState,
-    courses,
-    grading_scale:    gradingScale,
-    from_cache:       false,
-    scraped_at,
-  })
-}
-
-/**
- * Returns a cached row if it exists and is less than 30 days old, else null.
- */
-async function getFromCache(
-  admin: ReturnType<typeof createClient>,
-  code:  string,
-): Promise<CacheRow | null> {
-  const { data } = await admin
-    .from('ncaa_approved_courses_cache')
-    .select('ncaa_school_code, school_name, state, courses, grading_scale, scraped_at')
-    .eq('ncaa_school_code', code)
-    .maybeSingle()
-
-  if (!data) return null
-
-  const ageMs = Date.now() - new Date(data.scraped_at).getTime()
-  if (ageMs > CACHE_MAX_AGE_MS) {
-    console.log(`[scrape-ncaa-courses] cache stale for ${code} (age=${Math.round(ageMs / 86_400_000)}d)`)
-    return null
-  }
-
-  return data as CacheRow
-}
-
-/**
- * Fetches the course list for a known 6-digit hsCode (name-search path),
- * upserts into cache, and returns the response.
+ * Fetches the course list for a known 6-digit ncaa_school_code and returns the
+ * scraped data. No DB operations — caller is responsible for persistence.
  */
 async function scrapeSchool(
-  admin:         ReturnType<typeof createClient>,
   code:          string,
   schoolName:    string,
   schoolState:   string,
@@ -381,9 +282,9 @@ async function scrapeSchool(
     if (sessionCookie) headers['Cookie'] = sessionCookie
 
     const ctl = new AbortController()
-    const t   = setTimeout(() => ctl.abort(), SCRAPE_TIMEOUT)
+    const t   = setTimeout(() => ctl.abort(), 20_000)
     try {
-      const res = await fetch(NCAA_ACTION_URL, {
+      const res = await fetch('https://web3.ncaa.org/hsportal/exec/hsAction', {
         method:  'POST',
         signal:  ctl.signal,
         headers,
@@ -410,19 +311,19 @@ async function scrapeSchool(
     return json({ status: 'not_found', fallback: true })
   }
 
-  return cacheAndReturn(admin, code, schoolName, schoolState, courses, gradingScale)
+  return json({
+    status:           'found',
+    ncaa_school_code: code,
+    school_name:      schoolName,
+    state:            schoolState,
+    courses,
+    grading_scale:    gradingScale,
+    scraped_at:       new Date().toISOString(),
+  })
 }
 
 // ── HTML parsers ──────────────────────────────────────────────────────────────
 
-/**
- * Parses the name-search results page from the NCAA HS Portal.
- *
- * Returns a table with id="selectHsFormTable". Each row has a radio input
- * whose value is the 6-digit hsCode, plus cells for name, address, city, state.
- *
- * Column order (0-based): 0=radio, 1=name, 2=address, 3=city, 4=state, 5=zip
- */
 function parseSearchResults(html: string): School[] {
   const root    = parseHtml(html)
   const schools: School[] = []
@@ -437,8 +338,6 @@ function parseSearchResults(html: string): School[] {
     const cells = row.querySelectorAll('td')
     if (cells.length < 5) continue
 
-    // NCAA portal emits `type= "radio"` (space after =), breaking attribute-exact
-    // selectors — match by name instead.
     const radio = cells[0].querySelector('input[name="hsCode"]')
     const code  = radio?.getAttribute('value')?.trim()
     if (!code) continue
@@ -454,10 +353,6 @@ function parseSearchResults(html: string): School[] {
   return schools
 }
 
-/**
- * Parses course tables (approvedCourseTable_1..5) from a portal response.
- * Used for both the CEEB direct-result path and the dedicated course-fetch path.
- */
 function parseCourseList(html: string): Course[] {
   const root    = parseHtml(html)
   const courses: Course[] = []
@@ -470,7 +365,6 @@ function parseCourseList(html: string): Course[] {
       const cells = row.querySelectorAll('td')
       if (cells.length < 2) continue
 
-      // Title is column index 1; strip leading "=" disability-track marker
       const raw  = cells[1].text.trim()
       const name = raw.startsWith('=') ? raw.slice(1).trim() : raw
 
@@ -483,32 +377,18 @@ function parseCourseList(html: string): Course[] {
   return courses
 }
 
-/**
- * Parses the school-specific numeric grading scale from a portal course-list page.
- *
- * The portal has a grading period select (#hsGradingPeriodIntervalId) whose
- * selected option value is the ID suffix of the active scale div
- * (e.g. value="584789" → div#divId_584789). That div contains a
- * table.dispNumericGradeTable with columns: Grade | Max | Min.
- * We extract the Min column for A/B/C/D to build the cutoff map.
- *
- * Returns null if the scale section is absent (some pages omit it).
- */
 function parseGradingScale(html: string): GradingScale | null {
   const root = parseHtml(html)
 
-  // Find the currently-selected grading period
   const select = root.querySelector('#hsGradingPeriodIntervalId')
   if (!select) return null
   const selectedOption = select.querySelector('option[selected]')
   const periodId = selectedOption?.getAttribute('value')?.trim()
   if (!periodId || periodId === 'showAll') return null
 
-  // Find the grading scale div for this period
   const div = root.querySelector(`#divId_${periodId}`)
   if (!div) return null
 
-  // Find the numeric scale table
   const table = div.querySelector('table.dispNumericGradeTable')
   if (!table) return null
 

@@ -73,14 +73,14 @@ function Card({ title, badge, children, className = '' }) {
 function EligibilityContent() {
   const { session } = useAuth()
 
-  // Phase: idle | uploading | extracting | confirming | processing | picking_school | results
+  // Phase: idle | uploading | extracting | confirming | processing | school_not_in_database | results
   const [phase, setPhase]             = useState('idle')
   const [uploadedPath, setUploadedPath] = useState(null)
   const [extractedSchool, setExtractedSchool] = useState({ name: '', state: '' })
   const [extractedCeebCode, setExtractedCeebCode] = useState(null)
   const [editSchool, setEditSchool]   = useState({ name: '', state: '' })
   const [editingSchool, setEditingSchool] = useState(false)
-  const [schools, setSchools]         = useState([])   // multiple NCAA matches
+  const [schoolNotInDb, setSchoolNotInDb] = useState(null)
   const [result, setResult]           = useState(null)
   const [athleteId, setAthleteId]     = useState(null)
   const [history, setHistory]         = useState([])
@@ -195,7 +195,7 @@ function EligibilityContent() {
 
   // ── Step 3: Full analysis ───────────────────────────────────────────────
 
-  async function doAnalysis(schoolName, schoolState, ncaaCode = null) {
+  async function doAnalysis(schoolName, schoolState) {
     setPhase('processing')
     setError(null)
     try {
@@ -206,16 +206,15 @@ function EligibilityContent() {
         school_name:    schoolName,
         school_state:   schoolState,
       }
-      if (ncaaCode)          body.ncaa_school_code = ncaaCode
       if (extractedCeebCode) body.ceeb_code = extractedCeebCode
 
       const res  = await callFn(body)
       const data = await res.json()
       if (data.error) throw new Error(data.error)
 
-      if (data.status === 'needs_school_selection') {
-        setSchools(data.schools)
-        setPhase('picking_school')
+      if (data.status === 'school_not_in_database') {
+        setSchoolNotInDb({ school_name: data.school_name, state: data.state, ceeb_code: data.ceeb_code })
+        setPhase('school_not_in_database')
       } else if (data.status === 'found') {
         setResult(data)
         setPhase('results')
@@ -254,7 +253,7 @@ function EligibilityContent() {
 
   function reset() {
     setPhase('idle'); setUploadedPath(null); setExtractedSchool({ name: '', state: '' })
-    setEditSchool({ name: '', state: '' }); setEditingSchool(false); setSchools([])
+    setEditSchool({ name: '', state: '' }); setEditingSchool(false); setSchoolNotInDb(null)
     setResult(null); setError(null); setExtractedCeebCode(null); setDivTab('di')
   }
 
@@ -486,32 +485,31 @@ function EligibilityContent() {
           </Card>
         )}
 
-        {/* ── Multiple school matches ───────────────────────────────────── */}
-        {phase === 'picking_school' && (
-          <Card title="Select Your School">
+        {/* ── School not in database ────────────────────────────────────── */}
+        {phase === 'school_not_in_database' && schoolNotInDb && (
+          <Card title="School Not in Database">
             <div className="p-5 space-y-4">
-              <p className="text-sm text-gray-600">
-                Multiple schools matched <strong>"{extractedSchool.name}"</strong> in the NCAA portal. Select the one that matches your transcript.
-              </p>
-              <div className="space-y-2">
-                {schools.map(s => (
-                  <button
-                    key={s.ncaa_school_code}
-                    onClick={() => doAnalysis(s.name, s.state, s.ncaa_school_code)}
-                    className="w-full flex items-center justify-between px-4 py-3.5 bg-gray-50 hover:bg-brand/10 border border-gray-200 hover:border-brand rounded-xl transition-colors text-left"
-                  >
-                    <div>
-                      <p className="font-semibold text-black text-sm">{s.name}</p>
-                      <p className="text-xs text-gray-500 mt-0.5">{s.city}, {s.state}</p>
-                    </div>
-                    <svg className="w-4 h-4 text-gray-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                    </svg>
-                  </button>
-                ))}
+              <div className="flex gap-3 bg-yellow-50 border border-yellow-200 rounded-xl px-4 py-3">
+                <svg className="w-4 h-4 flex-shrink-0 mt-0.5 text-yellow-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v4m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+                <div className="text-sm text-yellow-800 space-y-1">
+                  <p>
+                    <strong>{schoolNotInDb.school_name}</strong> ({schoolNotInDb.state}) has not been added to our school database yet.
+                  </p>
+                  <p>Please contact your Ballers &amp; Bookworms staff to have it added before running your eligibility check.</p>
+                </div>
               </div>
-              <button onClick={reset} className="text-sm text-gray-400 hover:text-gray-700 underline underline-offset-2">
-                Cancel and start over
+              {schoolNotInDb.ceeb_code && (
+                <p className="text-xs text-gray-500">
+                  CEEB Code extracted from your transcript: <strong className="text-gray-700 font-mono">{schoolNotInDb.ceeb_code}</strong> — share this with staff to help them find your school quickly.
+                </p>
+              )}
+              <button
+                onClick={reset}
+                className="w-full border border-gray-200 text-sm font-bold text-gray-500 hover:text-gray-800 py-2.5 rounded-xl transition-colors"
+              >
+                Start Over
               </button>
             </div>
           </Card>
@@ -610,9 +608,6 @@ function EligibilityContent() {
           const reviewCount = result.courses.filter(c => c.needs_review && c.is_approved).length
           if (reviewCount > 0) {
             apWarnings.push(`${reviewCount} approved course${reviewCount > 1 ? 's are' : ' is'} flagged for review — confirm against your school's NCAA-approved list.`)
-          }
-          if (!result.approved_list_available) {
-            apWarnings.push('No NCAA-approved course list found for your school — all courses show as "Not Approved." Contact the NCAA Eligibility Center to verify.')
           }
 
           const inProgressCourses  = result.courses.filter(c => c.is_approved && c.grade === 'In Progress')
@@ -1015,7 +1010,6 @@ function EligibilityContent() {
                   <div className="px-5 py-3 bg-gray-50 border-t border-gray-100">
                     <p className="text-xs text-gray-400 leading-relaxed">
                       These courses were not found on your school's NCAA-approved list or could not be matched to a core category.
-                      {!result.approved_list_available && ' No approved course list was found for your school — contact the NCAA Eligibility Center to verify.'}
                     </p>
                   </div>
                 </Card>

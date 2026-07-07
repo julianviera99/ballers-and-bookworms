@@ -21,6 +21,8 @@ import AthleteView        from './pages/staff/AthleteView'
 import MentorApplications from './pages/staff/MentorApplications'
 import MentorsList        from './pages/staff/MentorsList'
 import MentorMatches      from './pages/staff/MentorMatches'
+import SchoolDatabase     from './pages/staff/SchoolDatabase'
+import SchoolEdit         from './pages/staff/SchoolEdit'
 
 function FeatureGate({ enabled, children }) {
   return enabled ? children : <Navigate to="/" replace />
@@ -50,6 +52,8 @@ export default function App() {
         <Route path="/staff/mentors/applications"  element={<MentorApplications />} />
         <Route path="/staff/mentors"               element={<MentorsList />} />
         <Route path="/staff/mentors/matches"       element={<MentorMatches />} />
+        <Route path="/staff/schools"               element={<SchoolDatabase />} />
+        <Route path="/staff/schools/:ceebCode"     element={<SchoolEdit />} />
       </Routes>
     </BrowserRouter>
   )

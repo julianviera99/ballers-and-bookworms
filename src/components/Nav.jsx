@@ -43,6 +43,12 @@ export default function Nav() {
             { to: '/staff/mentors/matches',      label: 'All Matches' },
           ],
         },
+        {
+          label: 'Eligibility',
+          links: [
+            { to: '/staff/schools', label: 'School Database' },
+          ],
+        },
       ]
     : [
         {

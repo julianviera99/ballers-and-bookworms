@@ -21,17 +21,13 @@
  *     ncaa_school_code, current_grade, courses, core_course_gpa,
  *     total_core_credits, pre_7th_semester_credits, di, dii, overall_status }
  *
- *   // NCAA portal returned multiple schools matching the transcript name
- *   { status: 'needs_school_selection', extracted_school: { name, state },
- *     schools: [{ ncaa_school_code, name, city, state }] }
- *
- *   // School not found on NCAA portal; assessment still saved, approved list empty
- *   { status: 'found', ..., ncaa_school_code: null, approved_list_available: false }
+ *   // School has not been added to the ncaa_schools database yet
+ *   { status: 'school_not_in_database', school_name, state, ceeb_code }
  *
  * Two-pass Claude flow:
  *   Pass 1 (cheap): extract high_school_name + high_school_state from the image/PDF
- *   → call scrape-ncaa-courses to fetch the correct school's approved list
- *   Pass 2 (full):  extract all courses + map against the correct approved list
+ *   → look up ncaa_schools table by ceeb_code or name+state
+ *   Pass 2 (full):  extract all courses + map against the school's approved list
  *
  * NCAA DI requirements (16 core courses):
  *   4 English, 3 Math (Algebra I+), 2 Natural/Physical Science (1 lab),
@@ -162,7 +158,6 @@ Deno.serve(async (req: Request) => {
   const athlete_id       = body.athlete_id       as string | undefined
   const storage_path     = body.storage_path     as string | undefined
   const storage_bucket   = body.storage_bucket   as string | undefined
-  const knownCode        = body.ncaa_school_code as string | undefined
   const extract_only     = body.extract_only                            // boolean | string | undefined
   const providedSchoolName  = body.school_name   as string | undefined
   const providedSchoolState = body.school_state  as string | undefined
@@ -263,55 +258,59 @@ Deno.serve(async (req: Request) => {
     }
   }
 
-  // ── Fetch approved course list for the extracted school ────────────────
-  // Calls scrape-ncaa-courses as an internal HTTP request, passing the user's
-  // auth token so the function can verify it normally.
+  // ── Look up school in ncaa_schools database ────────────────────────────
+  // Prefer CEEB code (globally unique); fall back to name+state match.
+  // If not found, return early — staff must add the school before processing.
 
   let approvedCourses: ApprovedCourse[] = []
-  let resolvedSchoolCode: string | null = knownCode ?? null
+  let resolvedSchoolCode: string | null = null
   let resolvedSchoolName  = extractedSchoolName
   let resolvedSchoolState = extractedSchoolState
   let gradingScale: GradingScale | null = null
 
-  try {
-    console.log(`[process-transcript] looking up NCAA courses for "${extractedSchoolName}" (${extractedSchoolState})...`)
-    const scrapeRes = await fetch(`${SUPABASE_URL}/functions/v1/scrape-ncaa-courses`, {
-      method:  'POST',
-      headers: { 'Authorization': authHeader, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        high_school_name: extractedSchoolName,
-        state:            extractedSchoolState,
-        ...(knownCode         ? { ncaa_school_code: knownCode }              : {}),
-        ...(extractedCeebCode ? { ceeb_code: extractedCeebCode }             : {}),
-      }),
-    })
+  {
+    console.log(`[process-transcript] looking up "${extractedSchoolName}" (${extractedSchoolState}) ceeb=${extractedCeebCode ?? 'none'} in ncaa_schools...`)
 
-    const scrapeData = await scrapeRes.json()
-    console.log(`[process-transcript] scrape-ncaa-courses status: ${scrapeData.status}`)
+    type SchoolRow = { ceeb_code: string; school_name: string; state: string; approved_courses: ApprovedCourse[]; grading_scale: GradingScale | null }
+    let schoolRow: SchoolRow | null = null
 
-    if (scrapeData.status === 'multiple_matches') {
-      // Caller must re-invoke with ncaa_school_code set to one of these
+    // Try CEEB code first
+    if (extractedCeebCode) {
+      const { data } = await admin
+        .from('ncaa_schools')
+        .select('ceeb_code, school_name, state, approved_courses, grading_scale')
+        .eq('ceeb_code', extractedCeebCode)
+        .maybeSingle()
+      schoolRow = data as SchoolRow | null
+    }
+
+    // Fall back to name+state lookup
+    if (!schoolRow) {
+      const { data } = await admin
+        .from('ncaa_schools')
+        .select('ceeb_code, school_name, state, approved_courses, grading_scale')
+        .ilike('school_name', extractedSchoolName)
+        .eq('state', extractedSchoolState)
+        .maybeSingle()
+      schoolRow = data as SchoolRow | null
+    }
+
+    if (!schoolRow) {
+      console.warn(`[process-transcript] school not in ncaa_schools database`)
       return json({
-        status:           'needs_school_selection',
-        extracted_school: { name: extractedSchoolName, state: extractedSchoolState },
-        schools:          scrapeData.schools,
+        status:      'school_not_in_database',
+        school_name: extractedSchoolName,
+        state:       extractedSchoolState,
+        ceeb_code:   extractedCeebCode ?? null,
       })
     }
 
-    if (scrapeData.status === 'found') {
-      approvedCourses    = scrapeData.courses ?? []
-      resolvedSchoolCode = scrapeData.ncaa_school_code
-      resolvedSchoolName = scrapeData.school_name  ?? extractedSchoolName
-      resolvedSchoolState= scrapeData.state        ?? extractedSchoolState
-      gradingScale       = scrapeData.grading_scale ?? null
-      console.log(`[process-transcript] loaded ${approvedCourses.length} approved courses for ${resolvedSchoolName}, grading_scale=${gradingScale ? JSON.stringify(gradingScale) : 'standard'}`)
-    } else {
-      // not_found — continue with empty list; mapping will mark all as Not Approved
-      console.warn(`[process-transcript] school not found on NCAA portal; proceeding without approved list`)
-    }
-  } catch (e) {
-    // Non-fatal: network error calling scrape-ncaa-courses. Proceed with empty list.
-    console.error(`[process-transcript] scrape-ncaa-courses call failed: ${(e as Error).message}`)
+    approvedCourses    = (schoolRow.approved_courses ?? []) as ApprovedCourse[]
+    resolvedSchoolCode = schoolRow.ceeb_code
+    resolvedSchoolName = schoolRow.school_name
+    resolvedSchoolState= schoolRow.state
+    gradingScale       = (schoolRow.grading_scale ?? null) as GradingScale | null
+    console.log(`[process-transcript] found in DB: "${resolvedSchoolName}" ceeb=${resolvedSchoolCode}, ${approvedCourses.length} approved courses, grading_scale=${gradingScale ? JSON.stringify(gradingScale) : 'standard'}`)
   }
 
   // ── Pass 2: Full extraction + course mapping ────────────────────────────
