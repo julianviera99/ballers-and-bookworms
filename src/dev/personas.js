@@ -2,18 +2,62 @@
 // under import.meta.env.DEV, which Vite strips from production builds).
 
 export const DEV_PERSONAS = [
-  // ── Athletes ──────────────────────────────────────────────────────────────
+  // ── Admins ────────────────────────────────────────────────────────────────
   {
-    id:          'dev-athlete-1',
-    email:       'dev.marcus@bandb.test',
+    id:          'dev-admin-1',
+    email:       'dev.admin1@bandb.test',
     password:    'devpass123',
-    displayName: 'Marcus Johnson',
-    role:        'student',
-    school:      'Lincoln High',
-    grade:       'Sophomore',
-    sports:      ['Basketball', 'Track'],
-    hometown:    'Atlanta',
-    homeState:   'GA',
+    displayName: 'Jordan Rivera',
+    role:        'admin',
+  },
+  {
+    id:          'dev-admin-2',
+    email:       'dev.admin2@bandb.test',
+    password:    'devpass123',
+    displayName: 'Morgan Torres',
+    role:        'admin',
+  },
+
+  // ── School Staff ──────────────────────────────────────────────────────────
+  // Each staff persona is scoped to a specific school via profiles.school_id.
+  // The matching student persona has school_ceeb_code set to the same value,
+  // so the "School staff can select own school athletes" RLS policy applies.
+  {
+    id:          'dev-staff-1',
+    email:       'dev.staff.nj@bandb.test',
+    password:    'devpass123',
+    displayName: 'Coach Patterson',
+    role:        'school_staff',
+    schoolId:    '310158',
+    schoolName:  'Burlington Township High School',
+    schoolState: 'NJ',
+  },
+  {
+    id:          'dev-staff-2',
+    email:       'dev.staff.ca@bandb.test',
+    password:    'devpass123',
+    displayName: 'Coach Nguyen',
+    role:        'school_staff',
+    schoolId:    '050999',
+    schoolName:  'Riverside High School',
+    schoolState: 'CA',
+  },
+
+  // ── Students ──────────────────────────────────────────────────────────────
+  // Marcus is at Burlington Township → visible to Coach Patterson only.
+  // Destiny is at Riverside High → visible to Coach Nguyen only.
+  {
+    id:             'dev-athlete-1',
+    email:          'dev.marcus@bandb.test',
+    password:       'devpass123',
+    displayName:    'Marcus Johnson',
+    role:           'student',
+    school:         'Burlington Township High School',
+    schoolCeebCode: '310158',
+    grade:          'Sophomore',
+    sports:         ['Basketball', 'Track'],
+    hometown:       'Burlington',
+    homeState:      'NJ',
     requests: [
       {
         category:    'athletic_equipment',
@@ -51,16 +95,17 @@ export const DEV_PERSONAS = [
   },
 
   {
-    id:          'dev-athlete-2',
-    email:       'dev.destiny@bandb.test',
-    password:    'devpass123',
-    displayName: 'Destiny Williams',
-    role:        'student',
-    school:      'Roosevelt High',
-    grade:       'Junior',
-    sports:      ['Soccer', 'Volleyball'],
-    hometown:    'Decatur',
-    homeState:   'GA',
+    id:             'dev-athlete-2',
+    email:          'dev.destiny@bandb.test',
+    password:       'devpass123',
+    displayName:    'Destiny Williams',
+    role:           'student',
+    school:         'Riverside High School',
+    schoolCeebCode: '050999',
+    grade:          'Junior',
+    sports:         ['Soccer', 'Volleyball'],
+    hometown:       'Riverside',
+    homeState:      'CA',
     requests: [
       {
         category:    'nutrition_consulting',
@@ -73,7 +118,7 @@ export const DEV_PERSONAS = [
       {
         category:    'camp_fees',
         amount:      450.00,
-        description: 'Elite Soccer Skills Camp at Georgia Tech, July 14–18. Includes a college recruiting showcase on day 3.',
+        description: 'Elite Soccer Skills Camp at UC Riverside, July 14–18. Includes a college recruiting showcase on day 3.',
         status:      'flagged',
         staff_note:  'Need a registration link or brochure to verify the camp before approving this amount.',
         created_at:  '2026-03-12T13:00:00Z',
@@ -87,44 +132,5 @@ export const DEV_PERSONAS = [
         created_at:  '2026-04-01T10:30:00Z',
       },
     ],
-  },
-
-  {
-    id:          'dev-athlete-3',
-    email:       'dev.tyler@bandb.test',
-    password:    'devpass123',
-    displayName: 'Tyler Chen',
-    role:        'student',
-    school:      'Washington High',
-    grade:       'Senior',
-    sports:      ['Swimming'],
-    hometown:    'Marietta',
-    homeState:   'GA',
-    requests: [
-      {
-        category:    'athletic_training',
-        amount:      250.00,
-        description: 'Swim-specific strength and conditioning — 5 sessions with Coach Daniels before the state qualifier.',
-        status:      'pending',
-        staff_note:  null,
-        created_at:  '2026-03-20T15:00:00Z',
-      },
-    ],
-  },
-
-  // ── Staff ─────────────────────────────────────────────────────────────────
-  {
-    id:          'dev-staff-1',
-    email:       'dev.coach@bandb.test',
-    password:    'devpass123',
-    displayName: 'Coach Rivera',
-    role:        'admin',
-  },
-  {
-    id:          'dev-staff-2',
-    email:       'dev.admin@bandb.test',
-    password:    'devpass123',
-    displayName: 'Admin Torres',
-    role:        'admin',
   },
 ]

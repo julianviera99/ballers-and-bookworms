@@ -6,9 +6,15 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
 import { DEV_PERSONAS } from './personas'
 
+const ROLE_GROUPS = [
+  { key: 'admin',        label: 'Admins',       color: 'bg-blue-600' },
+  { key: 'school_staff', label: 'School Staff',  color: 'bg-purple-600' },
+  { key: 'student',      label: 'Students',      color: 'bg-emerald-600' },
+]
+
 export default function DevSwitcher() {
   const { session } = useAuth()
-  const [open, setOpen]       = useState(false)
+  const [open, setOpen]           = useState(false)
   const [switching, setSwitching] = useState(null) // email currently being switched to
 
   async function switchTo(persona) {
@@ -25,7 +31,7 @@ export default function DevSwitcher() {
       return
     }
     window.location.replace(
-      persona.role === 'admin' ? '/admin' :
+      persona.role === 'admin'        ? '/admin' :
       persona.role === 'school_staff' ? '/school-staff' :
       '/dashboard'
     )
@@ -41,7 +47,7 @@ export default function DevSwitcher() {
   return (
     <div style={{ fontFamily: 'monospace' }} className="fixed bottom-6 sm:bottom-4 right-4 z-50">
       {open ? (
-        <div className="bg-gray-950 border border-gray-700 rounded-xl shadow-2xl w-64 overflow-hidden text-sm">
+        <div className="bg-gray-950 border border-gray-700 rounded-xl shadow-2xl w-72 overflow-hidden text-sm">
 
           {/* Header */}
           <div className="flex items-center justify-between px-3 py-2 border-b border-gray-800">
@@ -56,50 +62,64 @@ export default function DevSwitcher() {
             </button>
           </div>
 
-          {/* Persona list */}
-          <div className="p-2 space-y-1">
-            {DEV_PERSONAS.map(p => {
-              const isActive  = currentEmail === p.email
-              const isLoading = switching === p.email
-              const initials  = p.displayName.split(' ').map(n => n[0]).join('')
+          {/* Persona list grouped by role */}
+          <div className="p-2 space-y-3">
+            {ROLE_GROUPS.map(group => {
+              const personas = DEV_PERSONAS.filter(p => p.role === group.key)
+              if (!personas.length) return null
               return (
-                <button
-                  key={p.email}
-                  onClick={() => switchTo(p)}
-                  disabled={!!switching}
-                  className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left transition-colors disabled:opacity-50 ${
-                    isActive
-                      ? 'bg-yellow-400/15 border border-yellow-400/40'
-                      : 'hover:bg-gray-800 border border-transparent'
-                  }`}
-                >
-                  {/* Avatar */}
-                  <div className={`w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0 ${
-                    p.role === 'admin' ? 'bg-blue-600 text-white' : p.role === 'school_staff' ? 'bg-purple-600 text-white' : 'bg-emerald-600 text-white'
-                  }`}>
-                    {isLoading ? (
-                      <span className="animate-pulse">…</span>
-                    ) : (
-                      initials
-                    )}
-                  </div>
+                <div key={group.key}>
+                  <p className="text-[9px] font-bold text-gray-600 uppercase tracking-widest px-2 mb-1">
+                    {group.label}
+                  </p>
+                  <div className="space-y-1">
+                    {personas.map(p => {
+                      const isActive  = currentEmail === p.email
+                      const isLoading = switching === p.email
+                      const initials  = p.displayName.split(' ').map(n => n[0]).join('')
+                      return (
+                        <button
+                          key={p.email}
+                          onClick={() => switchTo(p)}
+                          disabled={!!switching}
+                          className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left transition-colors disabled:opacity-50 ${
+                            isActive
+                              ? 'bg-yellow-400/15 border border-yellow-400/40'
+                              : 'hover:bg-gray-800 border border-transparent'
+                          }`}
+                        >
+                          {/* Avatar */}
+                          <div className={`w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0 ${group.color} text-white`}>
+                            {isLoading ? (
+                              <span className="animate-pulse">…</span>
+                            ) : (
+                              initials
+                            )}
+                          </div>
 
-                  {/* Name + role */}
-                  <div className="min-w-0 flex-1">
-                    <div className="text-white text-xs font-semibold truncate leading-tight">
-                      {p.displayName}
-                    </div>
-                    <div className="text-gray-400 text-[10px] capitalize leading-tight">
-                      {p.role === 'school_staff' ? 'school staff' : p.role}
-                      {p.role === 'student' && p.sports && ` · ${p.sports[0]}`}
-                    </div>
-                  </div>
+                          {/* Name + subtitle */}
+                          <div className="min-w-0 flex-1">
+                            <div className="text-white text-xs font-semibold truncate leading-tight">
+                              {p.displayName}
+                            </div>
+                            <div className="text-gray-400 text-[10px] leading-tight truncate">
+                              {p.role === 'school_staff'
+                                ? p.schoolName
+                                : p.role === 'student' && p.sports
+                                  ? p.sports[0]
+                                  : p.role}
+                            </div>
+                          </div>
 
-                  {/* Active dot */}
-                  {isActive && (
-                    <span className="text-yellow-400 text-xs flex-shrink-0">●</span>
-                  )}
-                </button>
+                          {/* Active dot */}
+                          {isActive && (
+                            <span className="text-yellow-400 text-xs flex-shrink-0">●</span>
+                          )}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
               )
             })}
           </div>

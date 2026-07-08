@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
 import Nav from '../components/Nav'
-import StudentRoute from '../components/StudentRoute'
 
 const SUPABASE_URL   = import.meta.env.VITE_SUPABASE_URL
 const ACCEPTED_TYPES = ['image/jpeg', 'image/png', 'application/pdf']
@@ -71,7 +71,8 @@ function Card({ title, badge, children, className = '' }) {
 // ── Main page content ─────────────────────────────────────────────────────────
 
 function EligibilityContent() {
-  const { session } = useAuth()
+  const { session, role, isAdmin, isSchoolStaff, isStudent, schoolId, loading: authLoading } = useAuth()
+  const navigate = useNavigate()
 
   // Phase: idle | uploading | extracting | confirming | processing | school_not_in_database | results
   const [phase, setPhase]             = useState('idle')
@@ -83,39 +84,69 @@ function EligibilityContent() {
   const [schoolNotInDb, setSchoolNotInDb] = useState(null)
   const [result, setResult]           = useState(null)
   const [athleteId, setAthleteId]     = useState(null)
+  const [athletes, setAthletes]       = useState([])
+  const [loadingAthletes, setLoadingAthletes] = useState(false)
   const [history, setHistory]         = useState([])
-  const [loadingHistory, setLoadingHistory] = useState(true)
+  const [loadingHistory, setLoadingHistory] = useState(false)
   const [error, setError]             = useState(null)
   const [progressMsg, setProgressMsg] = useState('')
   const [dragging, setDragging]       = useState(false)
-  const [divTab, setDivTab]             = useState('di')
+  const [divTab, setDivTab]           = useState('di')
   const [courseFilter, setCourseFilter] = useState('all')
 
   const fileInputRef = useRef(null)
 
-  // ── Load athlete + history ──────────────────────────────────────────────
+  // ── Auth redirect ───────────────────────────────────────────────────────
 
   useEffect(() => {
-    async function load() {
-      const { data: athlete } = await supabase
-        .from('student_athletes')
-        .select('id')
-        .eq('user_id', session.user.id)
-        .maybeSingle()
-      if (!athlete) { setLoadingHistory(false); return }
-      setAthleteId(athlete.id)
+    if (authLoading) return
+    if (!session) { navigate('/', { replace: true }); return }
+    if (role === null) { navigate('/no-access', { replace: true }); return }
+  }, [authLoading, session, role, navigate])
 
-      const { data } = await supabase
-        .from('eligibility_assessments')
-        .select('id, assessment_date, high_school_name, high_school_state, overall_status, core_course_gpa, total_core_credits, created_at')
-        .eq('athlete_id', athlete.id)
-        .order('created_at', { ascending: false })
-        .limit(10)
-      setHistory(data ?? [])
-      setLoadingHistory(false)
+  // ── Load athlete / athlete list based on role ───────────────────────────
+
+  useEffect(() => {
+    if (authLoading || !session || role === null) return
+    if (isStudent) {
+      loadStudentAthlete()
+    } else {
+      loadAthleteList()
     }
-    load()
-  }, [session.user.id])
+  }, [authLoading, session, role]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function loadStudentAthlete() {
+    setLoadingHistory(true)
+    const { data: athlete } = await supabase
+      .from('student_athletes')
+      .select('id')
+      .eq('user_id', session.user.id)
+      .maybeSingle()
+    if (!athlete) { setLoadingHistory(false); return }
+    setAthleteId(athlete.id)
+    await loadHistory(athlete.id)
+  }
+
+  async function loadAthleteList() {
+    setLoadingAthletes(true)
+    let query = supabase.from('student_athletes').select('id, name, school').order('name')
+    if (isSchoolStaff && schoolId) query = query.eq('school_ceeb_code', schoolId)
+    const { data } = await query
+    setAthletes(data ?? [])
+    setLoadingAthletes(false)
+  }
+
+  async function loadHistory(id) {
+    setLoadingHistory(true)
+    const { data } = await supabase
+      .from('eligibility_assessments')
+      .select('id, assessment_date, high_school_name, high_school_state, overall_status, core_course_gpa, total_core_credits, created_at')
+      .eq('athlete_id', id)
+      .order('created_at', { ascending: false })
+      .limit(10)
+    setHistory(data ?? [])
+    setLoadingHistory(false)
+  }
 
   // ── Rotate progress messages ────────────────────────────────────────────
 
@@ -230,13 +261,7 @@ function EligibilityContent() {
 
   async function refreshHistory() {
     if (!athleteId) return
-    const { data } = await supabase
-      .from('eligibility_assessments')
-      .select('id, assessment_date, high_school_name, high_school_state, overall_status, core_course_gpa, total_core_credits, created_at')
-      .eq('athlete_id', athleteId)
-      .order('created_at', { ascending: false })
-      .limit(10)
-    setHistory(data ?? [])
+    await loadHistory(athleteId)
   }
 
   function callFn(body) {
@@ -295,7 +320,11 @@ function EligibilityContent() {
         <div className="max-w-4xl mx-auto flex items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold text-white uppercase tracking-wide">NCAA Eligibility Checker</h1>
-            <p className="text-white/50 text-sm mt-0.5">Upload your transcript to check DI and DII core-course eligibility</p>
+            <p className="text-white/50 text-sm mt-0.5">
+              {isAdmin || isSchoolStaff
+                ? 'Upload a transcript on behalf of a student athlete'
+                : 'Upload your transcript to check DI and DII core-course eligibility'}
+            </p>
           </div>
           {phase === 'results' && (
             <button
@@ -324,6 +353,43 @@ function EligibilityContent() {
         {phase === 'idle' && (
           <Card title="Upload Transcript">
             <div className="p-5 space-y-4">
+
+              {/* Athlete selector — admin and school_staff only */}
+              {(isAdmin || isSchoolStaff) && (
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 uppercase tracking-wide mb-1">
+                    Student Athlete
+                  </label>
+                  <select
+                    value={athleteId ?? ''}
+                    onChange={e => {
+                      const id = e.target.value || null
+                      setAthleteId(id)
+                      reset()
+                      if (id) loadHistory(id)
+                      else setHistory([])
+                    }}
+                    disabled={loadingAthletes}
+                    className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm text-black bg-white focus:outline-none focus:ring-2 focus:ring-brand focus:border-transparent transition disabled:opacity-50"
+                  >
+                    <option value="">— Select an athlete —</option>
+                    {athletes.map(a => (
+                      <option key={a.id} value={a.id}>
+                        {a.name}{a.school ? ` · ${a.school}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                  {isSchoolStaff && athletes.length === 0 && !loadingAthletes && (
+                    <p className="text-xs text-gray-400 mt-1.5">
+                      No athletes at your school have completed their profile yet.
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* Disclaimer + upload zone — always shown for students; shown after athlete selection for admin/staff */}
+              {(isStudent || athleteId) && (
+                <>
 
               {/* Disclaimer */}
               <div className="flex gap-3 bg-yellow-50 border border-yellow-200 rounded-xl px-4 py-3">
@@ -369,10 +435,13 @@ function EligibilityContent() {
                 </div>
               </div>
 
-              {!athleteId && (
+              {isStudent && !athleteId && (
                 <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
                   You need to complete your <a href="/profile" className="font-bold underline">profile</a> before checking eligibility.
                 </p>
+              )}
+
+                </>
               )}
             </div>
           </Card>
@@ -1075,8 +1144,8 @@ function EligibilityContent() {
           </Card>
         )}
 
-        {/* Empty history state in idle */}
-        {phase === 'idle' && !loadingHistory && history.length === 0 && (
+        {/* Empty history state in idle — only when an athlete is selected (or for students with a profile row) */}
+        {phase === 'idle' && !loadingHistory && history.length === 0 && athleteId && (
           <div className="text-center py-4 text-sm text-gray-400">
             No previous assessments. Upload a transcript above to get started.
           </div>
@@ -1088,9 +1157,5 @@ function EligibilityContent() {
 }
 
 export default function Eligibility() {
-  return (
-    <StudentRoute>
-      <EligibilityContent />
-    </StudentRoute>
-  )
+  return <EligibilityContent />
 }

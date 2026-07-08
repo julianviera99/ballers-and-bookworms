@@ -186,12 +186,13 @@ Deno.serve(async (req: Request) => {
       .eq('id', user.id)
       .maybeSingle()
 
+    const isAdmin       = callerProfile?.role === 'admin'
     const isSchoolStaff =
       callerProfile?.role === 'school_staff' &&
       callerProfile.school_id &&
       callerProfile.school_id === athlete.school_ceeb_code
 
-    if (!isSchoolStaff) {
+    if (!isAdmin && !isSchoolStaff) {
       return json({ error: 'Not authorized to process this athlete\'s transcript' }, 403)
     }
   }

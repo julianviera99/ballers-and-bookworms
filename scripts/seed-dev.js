@@ -32,8 +32,26 @@ async function findExistingUserId(email) {
   return users.find(u => u.email === email)?.id ?? null
 }
 
+// Ensure the schools referenced by school_staff personas exist in ncaa_schools.
+async function seedSchools() {
+  const staffPersonas = DEV_PERSONAS.filter(p => p.role === 'school_staff')
+  const schools = staffPersonas.map(p => ({
+    ceeb_code:   p.schoolId,
+    school_name: p.schoolName,
+    state:       p.schoolState,
+  }))
+
+  for (const school of schools) {
+    const { error } = await supabase
+      .from('ncaa_schools')
+      .upsert(school, { onConflict: 'ceeb_code' })
+    if (error) throw error
+    console.log(`  Upserted school: ${school.school_name} (${school.ceeb_code})`)
+  }
+}
+
 async function seedPersona(persona) {
-  console.log(`  ${persona.displayName} (${persona.email})`)
+  console.log(`\n  ${persona.displayName} [${persona.role}] (${persona.email})`)
 
   // 1. Create auth user (or find existing)
   let userId
@@ -56,34 +74,39 @@ async function seedPersona(persona) {
     console.log(`     created auth user → ${userId}`)
   }
 
-  // 2. Upsert profiles row for all personas
+  // 2. Upsert profiles row for all personas (include school_id for school_staff)
+  const profileRow = { id: userId, role: persona.role }
+  if (persona.role === 'school_staff') profileRow.school_id = persona.schoolId
+
   const { error: profileError } = await supabase
     .from('profiles')
-    .upsert({ id: userId, role: persona.role }, { onConflict: 'id' })
+    .upsert(profileRow, { onConflict: 'id' })
   if (profileError) throw profileError
-  console.log(`     upserted profiles entry (role: ${persona.role})`)
+  console.log(`     upserted profiles (role: ${persona.role}${persona.schoolId ? `, school_id: ${persona.schoolId}` : ''})`)
 
-  if (persona.role === 'admin') return
+  // Admins and school_staff don't have student_athletes rows
+  if (persona.role === 'admin' || persona.role === 'school_staff') return
 
-  // 3. Athlete path: upsert student_athletes row
+  // 3. Athlete path: upsert student_athletes row (with school_ceeb_code for RLS scoping)
   const { data: athlete, error: athleteError } = await supabase
     .from('student_athletes')
     .upsert(
       {
-        user_id:    userId,
-        name:       persona.displayName,
-        school:     persona.school,
-        grade:      persona.grade,
-        sports:     persona.sports,
-        hometown:   persona.hometown,
-        home_state: persona.homeState,
+        user_id:          userId,
+        name:             persona.displayName,
+        school:           persona.school,
+        school_ceeb_code: persona.schoolCeebCode ?? null,
+        grade:            persona.grade,
+        sports:           persona.sports,
+        hometown:         persona.hometown,
+        home_state:       persona.homeState,
       },
       { onConflict: 'user_id' }
     )
     .select('id')
     .single()
   if (athleteError) throw athleteError
-  console.log(`     upserted student_athlete → ${athlete.id}`)
+  console.log(`     upserted student_athlete → ${athlete.id} (school_ceeb_code: ${persona.schoolCeebCode ?? 'none'})`)
 
   // 4. Insert funding requests (skip if any already exist for this athlete)
   const { data: existing } = await supabase
@@ -117,6 +140,9 @@ async function seedPersona(persona) {
 async function main() {
   console.log('\n🌱 Seeding dev personas...\n')
 
+  console.log('Ensuring schools exist in ncaa_schools...')
+  await seedSchools()
+
   for (const persona of DEV_PERSONAS) {
     await seedPersona(persona)
   }
@@ -128,7 +154,7 @@ Start the dev server and look for the yellow DEV button in the
 bottom-right corner to switch between personas instantly.
 
 Credentials (all passwords: devpass123):
-${DEV_PERSONAS.map(p => `  ${p.role.padEnd(7)} ${p.displayName.padEnd(20)} ${p.email}`).join('\n')}
+${DEV_PERSONAS.map(p => `  ${p.role.padEnd(12)} ${p.displayName.padEnd(20)} ${p.email}`).join('\n')}
 `)
 }
 

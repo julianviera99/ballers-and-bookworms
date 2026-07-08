@@ -201,7 +201,7 @@ export default function Landing() {
                       className="w-full flex items-center gap-3 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/20 disabled:opacity-50 rounded-xl px-4 py-3 transition-colors"
                     >
                       <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${
-                        p.role === 'staff' ? 'bg-blue-500 text-white' : 'bg-brand text-black'
+                        p.role === 'admin' ? 'bg-blue-500 text-white' : p.role === 'school_staff' ? 'bg-purple-500 text-white' : 'bg-brand text-black'
                       }`}>
                         {isLoading ? (
                           <span className="animate-pulse">…</span>
@@ -209,8 +209,9 @@ export default function Landing() {
                       </div>
                       <div className="text-left min-w-0">
                         <p className="text-white text-sm font-semibold leading-tight">{p.displayName}</p>
-                        <p className="text-white/40 text-xs capitalize leading-tight">
-                          {p.role}{p.sports ? ` · ${p.sports[0]}` : ''}
+                        <p className="text-white/40 text-xs leading-tight">
+                          {p.role === 'school_staff' ? 'School Staff' : p.role === 'admin' ? 'Admin' : 'Student'}
+                          {p.role === 'student' && p.sports ? ` · ${p.sports[0]}` : ''}
                         </p>
                       </div>
                       {!switching && (

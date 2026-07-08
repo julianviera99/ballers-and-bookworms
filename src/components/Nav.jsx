@@ -28,27 +28,27 @@ export default function Nav() {
 
   const linkGroups = isAdmin
     ? [
-        {
+        ...(ENABLE_BUDGETING ? [{
           label: null,
           links: [
             { to: '/admin',          label: 'Pending Requests' },
             { to: '/admin/athletes', label: 'All Athletes' },
           ],
-        },
-        {
+        }] : []),
+        ...(ENABLE_MENTORSHIP ? [{
           label: 'Mentorship',
           links: [
             { to: '/admin/mentors/applications', label: 'Mentor Applications' },
             { to: '/admin/mentors',              label: 'All Mentors' },
             { to: '/admin/mentors/matches',      label: 'All Matches' },
           ],
-        },
-        {
+        }] : []),
+        ...(ENABLE_ELIGIBILITY ? [{
           label: 'Eligibility',
           links: [
             { to: '/admin/schools', label: 'School Database' },
           ],
-        },
+        }] : []),
         {
           label: 'Admin',
           links: [
