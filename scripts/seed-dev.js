@@ -56,15 +56,14 @@ async function seedPersona(persona) {
     console.log(`     created auth user → ${userId}`)
   }
 
-  // 2. Staff path: upsert staff_users row
-  if (persona.role === 'staff') {
-    const { error } = await supabase
-      .from('staff_users')
-      .upsert({ email: persona.email, user_id: userId }, { onConflict: 'email' })
-    if (error) throw error
-    console.log(`     upserted staff_users entry`)
-    return
-  }
+  // 2. Upsert profiles row for all personas
+  const { error: profileError } = await supabase
+    .from('profiles')
+    .upsert({ id: userId, role: persona.role }, { onConflict: 'id' })
+  if (profileError) throw profileError
+  console.log(`     upserted profiles entry (role: ${persona.role})`)
+
+  if (persona.role === 'admin') return
 
   // 3. Athlete path: upsert student_athletes row
   const { data: athlete, error: athleteError } = await supabase

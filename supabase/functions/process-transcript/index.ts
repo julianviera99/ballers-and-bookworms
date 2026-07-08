@@ -169,15 +169,31 @@ Deno.serve(async (req: Request) => {
 
   console.log(`[process-transcript] athlete=${athlete_id} path=${storage_path}`)
 
-  // Verify athlete belongs to calling user
+  // Verify the caller is the athlete OR a school_staff member for the same school
   const { data: athlete } = await admin
     .from('student_athletes')
-    .select('id, user_id')
+    .select('id, user_id, school_ceeb_code')
     .eq('id', athlete_id)
     .maybeSingle()
 
-  if (!athlete || athlete.user_id !== user.id) {
-    return json({ error: 'athlete_id not found or does not belong to you' }, 403)
+  if (!athlete) return json({ error: 'athlete_id not found' }, 403)
+
+  const isOwner = athlete.user_id === user.id
+  if (!isOwner) {
+    const { data: callerProfile } = await admin
+      .from('profiles')
+      .select('role, school_id')
+      .eq('id', user.id)
+      .maybeSingle()
+
+    const isSchoolStaff =
+      callerProfile?.role === 'school_staff' &&
+      callerProfile.school_id &&
+      callerProfile.school_id === athlete.school_ceeb_code
+
+    if (!isSchoolStaff) {
+      return json({ error: 'Not authorized to process this athlete\'s transcript' }, 403)
+    }
   }
 
   // ── Download transcript from Storage ───────────────────────────────────

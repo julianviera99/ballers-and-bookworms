@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
 import Nav from '../components/Nav'
-import ProtectedRoute from '../components/ProtectedRoute'
+import StudentRoute from '../components/StudentRoute'
 
 const GRADES = ['Freshman', 'Sophomore', 'Junior', 'Senior']
 
@@ -137,8 +137,8 @@ function ProfileContent() {
 
 export default function Profile() {
   return (
-    <ProtectedRoute>
+    <StudentRoute>
       <ProfileContent />
-    </ProtectedRoute>
+    </StudentRoute>
   )
 }

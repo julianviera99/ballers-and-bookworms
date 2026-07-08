@@ -1,5 +1,5 @@
 import Nav from '../../components/Nav'
-import StaffRoute from '../../components/StaffRoute'
+import AdminRoute from '../../components/AdminRoute'
 
 function MentorMatchesContent() {
   return (
@@ -24,8 +24,8 @@ function MentorMatchesContent() {
 
 export default function MentorMatches() {
   return (
-    <StaffRoute>
+    <AdminRoute>
       <MentorMatchesContent />
-    </StaffRoute>
+    </AdminRoute>
   )
 }

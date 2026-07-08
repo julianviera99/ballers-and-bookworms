@@ -36,7 +36,7 @@ const FEATURES = [
 ]
 
 export default function Landing() {
-  const { session, isStaff, loading } = useAuth()
+  const { session, isAdmin, isSchoolStaff, loading } = useAuth()
   const navigate = useNavigate()
   const [mode, setMode] = useState('github') // 'github' | 'dev'
   const [signingIn, setSigningIn] = useState(false)
@@ -45,8 +45,11 @@ export default function Landing() {
 
   useEffect(() => {
     if (loading) return
-    if (session) navigate(isStaff ? '/staff' : '/dashboard', { replace: true })
-  }, [loading, session, isStaff, navigate])
+    if (!session) return
+    if (isAdmin)       navigate('/admin',        { replace: true })
+    else if (isSchoolStaff) navigate('/school-staff', { replace: true })
+    else               navigate('/dashboard',    { replace: true })
+  }, [loading, session, isAdmin, isSchoolStaff, navigate])
 
   useEffect(() => {
     if (DEV_MODE) {
@@ -58,7 +61,7 @@ export default function Landing() {
     setSigningIn(true)
     await supabase.auth.signInWithOAuth({
       provider: 'github',
-      options: { redirectTo: `${window.location.origin}/dashboard` },
+      options: { redirectTo: `${window.location.origin}/` },
     })
   }
 
@@ -74,7 +77,11 @@ export default function Landing() {
       setSwitching(null)
       return
     }
-    window.location.replace(persona.role === 'staff' ? '/staff' : '/dashboard')
+    window.location.replace(
+      persona.role === 'admin' ? '/admin' :
+      persona.role === 'school_staff' ? '/school-staff' :
+      '/dashboard'
+    )
   }
 
   return (

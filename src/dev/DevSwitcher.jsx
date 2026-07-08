@@ -24,7 +24,11 @@ export default function DevSwitcher() {
       setSwitching(null)
       return
     }
-    window.location.replace(persona.role === 'staff' ? '/staff' : '/dashboard')
+    window.location.replace(
+      persona.role === 'admin' ? '/admin' :
+      persona.role === 'school_staff' ? '/school-staff' :
+      '/dashboard'
+    )
   }
 
   async function goToLanding() {
@@ -71,7 +75,7 @@ export default function DevSwitcher() {
                 >
                   {/* Avatar */}
                   <div className={`w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0 ${
-                    p.role === 'staff' ? 'bg-blue-600 text-white' : 'bg-emerald-600 text-white'
+                    p.role === 'admin' ? 'bg-blue-600 text-white' : p.role === 'school_staff' ? 'bg-purple-600 text-white' : 'bg-emerald-600 text-white'
                   }`}>
                     {isLoading ? (
                       <span className="animate-pulse">…</span>
@@ -86,8 +90,8 @@ export default function DevSwitcher() {
                       {p.displayName}
                     </div>
                     <div className="text-gray-400 text-[10px] capitalize leading-tight">
-                      {p.role}
-                      {p.role === 'athlete' && p.sports && ` · ${p.sports[0]}`}
+                      {p.role === 'school_staff' ? 'school staff' : p.role}
+                      {p.role === 'student' && p.sports && ` · ${p.sports[0]}`}
                     </div>
                   </div>
 

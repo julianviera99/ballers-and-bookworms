@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
 import Nav from '../components/Nav'
-import ProtectedRoute from '../components/ProtectedRoute'
+import StudentRoute from '../components/StudentRoute'
 
 const SUPABASE_URL   = import.meta.env.VITE_SUPABASE_URL
 const ACCEPTED_TYPES = ['image/jpeg', 'image/png', 'application/pdf']
@@ -1089,8 +1089,8 @@ function EligibilityContent() {
 
 export default function Eligibility() {
   return (
-    <ProtectedRoute>
+    <StudentRoute>
       <EligibilityContent />
-    </ProtectedRoute>
+    </StudentRoute>
   )
 }

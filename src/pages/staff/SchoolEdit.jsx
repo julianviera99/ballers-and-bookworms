@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../lib/AuthContext'
 import Nav from '../../components/Nav'
-import StaffRoute from '../../components/StaffRoute'
+import AdminRoute from '../../components/AdminRoute'
 
 const NCAA_CATEGORIES = [
   'English',
@@ -105,7 +105,7 @@ function SchoolEditContent() {
       <div className="min-h-screen bg-gray-100">
         <Nav />
         <div className="max-w-4xl mx-auto px-4 py-12 text-center text-gray-500">
-          School not found. <button onClick={() => navigate('/staff/schools')} className="text-brand underline">Back to School Database</button>
+          School not found. <button onClick={() => navigate('/admin/schools')} className="text-brand underline">Back to School Database</button>
         </div>
       </div>
     )
@@ -118,7 +118,7 @@ function SchoolEditContent() {
       <div className="bg-black px-4 sm:px-6 py-8">
         <div className="max-w-4xl mx-auto">
           <button
-            onClick={() => navigate('/staff/schools')}
+            onClick={() => navigate('/admin/schools')}
             className="text-xs text-white/50 hover:text-white/80 transition-colors mb-2 flex items-center gap-1"
           >
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" /></svg>
@@ -262,7 +262,7 @@ function SchoolEditContent() {
             {saving ? <><Spinner className="w-4 h-4" /> Saving…</> : 'Save Changes'}
           </button>
           <button
-            onClick={() => navigate('/staff/schools')}
+            onClick={() => navigate('/admin/schools')}
             className="px-6 py-3 text-sm font-bold text-gray-500 hover:text-gray-800 border border-gray-200 rounded-xl transition-colors"
           >
             Back
@@ -276,8 +276,8 @@ function SchoolEditContent() {
 
 export default function SchoolEdit() {
   return (
-    <StaffRoute>
+    <AdminRoute>
       <SchoolEditContent />
-    </StaffRoute>
+    </AdminRoute>
   )
 }

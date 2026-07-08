@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
 import Nav from '../components/Nav'
-import ProtectedRoute from '../components/ProtectedRoute'
+import StudentRoute from '../components/StudentRoute'
 import { ENABLE_BUDGETING } from '../lib/features'
 
 const BUDGET = 1000
@@ -28,15 +28,13 @@ const STATUS_STYLES = {
 }
 
 function DashboardContent() {
-  const { session, isStaff } = useAuth()
+  const { session } = useAuth()
   const navigate = useNavigate()
   const [athlete, setAthlete] = useState(null)
   const [requests, setRequests] = useState([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    if (isStaff) { navigate('/staff', { replace: true }); return }
-
     async function load() {
       const { data } = await supabase
         .from('student_athletes')
@@ -58,7 +56,7 @@ function DashboardContent() {
       setLoading(false)
     }
     load()
-  }, [session, isStaff, navigate])
+  }, [session, navigate])
 
   if (loading) return null
 
@@ -224,8 +222,8 @@ function DashboardContent() {
 
 export default function Dashboard() {
   return (
-    <ProtectedRoute>
+    <StudentRoute>
       <DashboardContent />
-    </ProtectedRoute>
+    </StudentRoute>
   )
 }

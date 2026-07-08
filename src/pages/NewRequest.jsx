@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
 import Nav from '../components/Nav'
-import ProtectedRoute from '../components/ProtectedRoute'
+import StudentRoute from '../components/StudentRoute'
 
 const CATEGORIES = [
   { value: 'academic_supplies',    label: 'Academic Supplies' },
@@ -175,8 +175,8 @@ function NewRequestContent() {
 
 export default function NewRequest() {
   return (
-    <ProtectedRoute>
+    <StudentRoute>
       <NewRequestContent />
-    </ProtectedRoute>
+    </StudentRoute>
   )
 }

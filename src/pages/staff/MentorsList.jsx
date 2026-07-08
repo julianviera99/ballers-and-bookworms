@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import Nav from '../../components/Nav'
-import StaffRoute from '../../components/StaffRoute'
+import AdminRoute from '../../components/AdminRoute'
 
 // ── Mentor avatar ─────────────────────────────────────────────────────────────
 
@@ -219,8 +219,8 @@ function MentorsListContent() {
 
 export default function MentorsList() {
   return (
-    <StaffRoute>
+    <AdminRoute>
       <MentorsListContent />
-    </StaffRoute>
+    </AdminRoute>
   )
 }

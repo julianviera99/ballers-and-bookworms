@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import Nav from '../../components/Nav'
-import ProtectedRoute from '../../components/ProtectedRoute'
+import StudentRoute from '../../components/StudentRoute'
 import { supabase } from '../../lib/supabase'
 
 const GRADES = [
@@ -448,8 +448,8 @@ function FindMentorContent() {
 
 export default function FindMentor() {
   return (
-    <ProtectedRoute>
+    <StudentRoute>
       <FindMentorContent />
-    </ProtectedRoute>
+    </StudentRoute>
   )
 }

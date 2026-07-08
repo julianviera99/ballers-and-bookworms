@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../lib/AuthContext'
 import Nav from '../../components/Nav'
-import StaffRoute from '../../components/StaffRoute'
+import AdminRoute from '../../components/AdminRoute'
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
 
@@ -327,7 +327,7 @@ function SchoolDatabaseContent() {
                               {refreshingCode === s.ceeb_code ? <><Spinner className="w-3 h-3" /> Refreshing…</> : 'Refresh'}
                             </button>
                             <Link
-                              to={`/staff/schools/${encodeURIComponent(s.ceeb_code)}`}
+                              to={`/admin/schools/${encodeURIComponent(s.ceeb_code)}`}
                               className="text-xs font-semibold text-brand hover:text-brand-dark transition-colors"
                             >
                               Edit
@@ -369,7 +369,7 @@ function SchoolDatabaseContent() {
                           {refreshingCode === s.ceeb_code ? 'Refreshing…' : 'Refresh'}
                         </button>
                         <Link
-                          to={`/staff/schools/${encodeURIComponent(s.ceeb_code)}`}
+                          to={`/admin/schools/${encodeURIComponent(s.ceeb_code)}`}
                           className="text-xs font-semibold text-brand hover:text-brand-dark transition-colors"
                         >
                           Edit
@@ -390,8 +390,8 @@ function SchoolDatabaseContent() {
 
 export default function SchoolDatabase() {
   return (
-    <StaffRoute>
+    <AdminRoute>
       <SchoolDatabaseContent />
-    </StaffRoute>
+    </AdminRoute>
   )
 }
