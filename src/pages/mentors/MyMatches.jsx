@@ -1,5 +1,5 @@
 import Nav from '../../components/Nav'
-import ProtectedRoute from '../../components/ProtectedRoute'
+import StudentRoute from '../../components/StudentRoute'
 
 function MyMatchesContent() {
   return (
@@ -25,8 +25,8 @@ function MyMatchesContent() {
 
 export default function MyMatches() {
   return (
-    <ProtectedRoute>
+    <StudentRoute>
       <MyMatchesContent />
-    </ProtectedRoute>
+    </StudentRoute>
   )
 }

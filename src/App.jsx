@@ -5,8 +5,10 @@ import { ENABLE_BUDGETING, ENABLE_MENTORSHIP, ENABLE_ELIGIBILITY } from './lib/f
 import Landing     from './pages/Landing'
 import MentorApply from './pages/MentorApply'
 import Demo        from './pages/Demo'
+import NoAccess    from './pages/NoAccess'
+import InviteAccept from './pages/InviteAccept'
 
-// Student athlete (ProtectedRoute inside each page)
+// Student athlete (StudentRoute inside each page)
 import Dashboard  from './pages/Dashboard'
 import Profile    from './pages/Profile'
 import NewRequest from './pages/NewRequest'
@@ -14,13 +16,21 @@ import FindMentor   from './pages/mentors/FindMentor'
 import MyMatches    from './pages/mentors/MyMatches'
 import Eligibility  from './pages/Eligibility'
 
-// Staff (StaffRoute inside each page)
+// Admin (AdminRoute inside each page)
 import StaffDashboard     from './pages/staff/StaffDashboard'
 import AthletesList       from './pages/staff/AthletesList'
 import AthleteView        from './pages/staff/AthleteView'
 import MentorApplications from './pages/staff/MentorApplications'
 import MentorsList        from './pages/staff/MentorsList'
 import MentorMatches      from './pages/staff/MentorMatches'
+import SchoolDatabase     from './pages/staff/SchoolDatabase'
+import SchoolEdit         from './pages/staff/SchoolEdit'
+import UserManagement     from './pages/staff/UserManagement'
+import InviteUser         from './pages/staff/InviteUser'
+
+// School staff (SchoolStaffRoute inside each page)
+import SchoolStaffDashboard from './pages/school-staff/SchoolStaffDashboard'
+import StaffSchoolCourses    from './pages/school-staff/StaffSchoolCourses'
 
 function FeatureGate({ enabled, children }) {
   return enabled ? children : <Navigate to="/" replace />
@@ -31,9 +41,11 @@ export default function App() {
     <BrowserRouter>
       <Routes>
         {/* Public */}
-        <Route path="/"             element={<Landing />} />
-        <Route path="/demo"         element={<Demo />} />
-        <Route path="/mentor/apply" element={<MentorApply />} />
+        <Route path="/"              element={<Landing />} />
+        <Route path="/demo"          element={<Demo />} />
+        <Route path="/mentor/apply"  element={<MentorApply />} />
+        <Route path="/no-access"     element={<NoAccess />} />
+        <Route path="/invite/:token" element={<InviteAccept />} />
 
         {/* Student athlete */}
         <Route path="/dashboard"       element={<Dashboard />} />
@@ -43,13 +55,25 @@ export default function App() {
         <Route path="/mentors/matches" element={<FeatureGate enabled={ENABLE_MENTORSHIP}><MyMatches /></FeatureGate>} />
         <Route path="/eligibility"     element={<FeatureGate enabled={ENABLE_ELIGIBILITY}><Eligibility /></FeatureGate>} />
 
-        {/* Staff */}
-        <Route path="/staff"                       element={<StaffDashboard />} />
-        <Route path="/staff/athletes"              element={<AthletesList />} />
-        <Route path="/staff/athletes/:id"          element={<AthleteView />} />
-        <Route path="/staff/mentors/applications"  element={<MentorApplications />} />
-        <Route path="/staff/mentors"               element={<MentorsList />} />
-        <Route path="/staff/mentors/matches"       element={<MentorMatches />} />
+        {/* Admin */}
+        <Route path="/admin"                       element={<StaffDashboard />} />
+        <Route path="/admin/athletes"              element={<AthletesList />} />
+        <Route path="/admin/athletes/:id"          element={<AthleteView />} />
+        <Route path="/admin/mentors/applications"  element={<MentorApplications />} />
+        <Route path="/admin/mentors"               element={<MentorsList />} />
+        <Route path="/admin/mentors/matches"       element={<MentorMatches />} />
+        <Route path="/admin/schools"               element={<SchoolDatabase />} />
+        <Route path="/admin/schools/:ceebCode"     element={<SchoolEdit />} />
+        <Route path="/admin/users"                 element={<UserManagement />} />
+        <Route path="/admin/users/invite"          element={<InviteUser />} />
+
+        {/* Legacy /staff/* redirects */}
+        <Route path="/staff"                       element={<Navigate to="/admin" replace />} />
+        <Route path="/staff/*"                     element={<Navigate to="/admin" replace />} />
+
+        {/* School staff */}
+        <Route path="/school-staff"         element={<SchoolStaffDashboard />} />
+        <Route path="/school-staff/courses" element={<FeatureGate enabled={ENABLE_ELIGIBILITY}><StaffSchoolCourses /></FeatureGate>} />
       </Routes>
     </BrowserRouter>
   )

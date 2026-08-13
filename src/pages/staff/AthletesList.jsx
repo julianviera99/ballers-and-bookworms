@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
 import Nav from '../../components/Nav'
-import StaffRoute from '../../components/StaffRoute'
+import AdminRoute from '../../components/AdminRoute'
 
 const BUDGET = 1000
 
@@ -92,7 +92,7 @@ function AthletesListContent() {
                         </td>
                         <td className="px-6 py-4 text-right">
                           <Link
-                            to={`/staff/athletes/${a.id}`}
+                            to={`/admin/athletes/${a.id}`}
                             className="text-xs font-bold text-black underline underline-offset-2 hover:text-gray-600 transition-colors"
                           >
                             View →
@@ -113,8 +113,8 @@ function AthletesListContent() {
 
 export default function AthletesList() {
   return (
-    <StaffRoute>
+    <AdminRoute>
       <AthletesListContent />
-    </StaffRoute>
+    </AdminRoute>
   )
 }

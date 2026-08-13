@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import Nav from '../../components/Nav'
-import StaffRoute from '../../components/StaffRoute'
+import AdminRoute from '../../components/AdminRoute'
 
 // Chip colors per mentorship area category
 const AREA_COLORS = {
@@ -409,8 +409,8 @@ function MentorApplicationsContent() {
 
 export default function MentorApplications() {
   return (
-    <StaffRoute>
+    <AdminRoute>
       <MentorApplicationsContent />
-    </StaffRoute>
+    </AdminRoute>
   )
 }

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
 import Nav from '../../components/Nav'
-import StaffRoute from '../../components/StaffRoute'
+import AdminRoute from '../../components/AdminRoute'
 
 const CATEGORY_LABELS = {
   academic_supplies:    'Academic Supplies',
@@ -66,7 +66,7 @@ function StaffDashboardContent() {
             <p className="text-white/50 text-sm mt-0.5">Review and action incoming funding requests.</p>
           </div>
           <Link
-            to="/staff/athletes"
+            to="/admin/athletes"
             className="self-start sm:self-auto text-sm font-bold text-brand hover:text-brand-dark transition-colors uppercase tracking-wide"
           >
             View all athletes →
@@ -90,7 +90,7 @@ function StaffDashboardContent() {
                   <span className="text-white/30">·</span>
                   <span className="text-sm text-white/50">{athlete?.school}</span>
                   <Link
-                    to={`/staff/athletes/${athlete?.id}`}
+                    to={`/admin/athletes/${athlete?.id}`}
                     className="text-xs font-bold text-brand hover:text-brand-dark ml-auto"
                   >
                     View budget →
@@ -160,8 +160,8 @@ function StaffDashboardContent() {
 
 export default function StaffDashboard() {
   return (
-    <StaffRoute>
+    <AdminRoute>
       <StaffDashboardContent />
-    </StaffRoute>
+    </AdminRoute>
   )
 }

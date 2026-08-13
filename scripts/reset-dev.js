@@ -25,25 +25,12 @@ const supabase = createClient(supabaseUrl, serviceRoleKey, {
 async function main() {
   console.log('\n🗑️  Resetting dev personas...\n')
 
-  const devEmails   = [
+  const devEmails = [
     ...DEV_PERSONAS.map(p => p.email),
     ...DEV_MENTORS.map(m => m.email),
   ]
-  const staffEmails = DEV_PERSONAS.filter(p => p.role === 'staff').map(p => p.email)
 
-  // 1. Remove staff_users entries for dev staff
-  //    (auth.users cascade only removes the linked row if user_id is set;
-  //     we clean the email-keyed row explicitly too)
-  if (staffEmails.length) {
-    const { error } = await supabase
-      .from('staff_users')
-      .delete()
-      .in('email', staffEmails)
-    if (error) throw error
-    console.log(`  Deleted staff_users entries for: ${staffEmails.join(', ')}`)
-  }
-
-  // 2. Find and delete auth users (cascades to student_athletes + funding_requests)
+  // 1. Find and delete auth users (cascades to profiles + student_athletes + funding_requests)
   const { data: { users }, error: listError } = await supabase.auth.admin.listUsers({ perPage: 1000 })
   if (listError) throw listError
 

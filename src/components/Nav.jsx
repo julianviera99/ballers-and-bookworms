@@ -5,12 +5,12 @@ import { useAuth } from '../lib/AuthContext'
 import { ENABLE_BUDGETING, ENABLE_MENTORSHIP, ENABLE_ELIGIBILITY } from '../lib/features'
 
 export default function Nav() {
-  const { session, isStaff } = useAuth()
+  const { session, isAdmin, isSchoolStaff } = useAuth()
   const navigate = useNavigate()
   const { pathname } = useLocation()
   const [open, setOpen] = useState(false)
 
-  const isHome = pathname === (isStaff ? '/staff' : '/dashboard')
+  const isHome = pathname === (isAdmin ? '/admin' : isSchoolStaff ? '/school-staff' : '/dashboard')
 
   // Prefer GitHub username (@handle), fall back to email
   const githubUsername = session?.user?.user_metadata?.user_name
@@ -26,23 +26,50 @@ export default function Nav() {
     window.location.replace('/')
   }
 
-  const linkGroups = isStaff
+  const linkGroups = isAdmin
+    ? [
+        ...(ENABLE_BUDGETING ? [{
+          label: null,
+          links: [
+            { to: '/admin',          label: 'Pending Requests' },
+            { to: '/admin/athletes', label: 'All Athletes' },
+          ],
+        }] : []),
+        ...(ENABLE_MENTORSHIP ? [{
+          label: 'Mentorship',
+          links: [
+            { to: '/admin/mentors/applications', label: 'Mentor Applications' },
+            { to: '/admin/mentors',              label: 'All Mentors' },
+            { to: '/admin/mentors/matches',      label: 'All Matches' },
+          ],
+        }] : []),
+        ...(ENABLE_ELIGIBILITY ? [{
+          label: 'Eligibility',
+          links: [
+            { to: '/admin/schools', label: 'School Database' },
+          ],
+        }] : []),
+        {
+          label: 'Admin',
+          links: [
+            { to: '/admin/users', label: 'Users' },
+          ],
+        },
+      ]
+    : isSchoolStaff
     ? [
         {
           label: null,
           links: [
-            { to: '/staff',          label: 'Pending Requests' },
-            { to: '/staff/athletes', label: 'All Athletes' },
+            { to: '/school-staff',          label: 'My Athletes' },
           ],
         },
-        {
-          label: 'Mentorship',
+        ...(ENABLE_ELIGIBILITY ? [{
+          label: 'Eligibility',
           links: [
-            { to: '/staff/mentors/applications', label: 'Mentor Applications' },
-            { to: '/staff/mentors',              label: 'All Mentors' },
-            { to: '/staff/mentors/matches',      label: 'All Matches' },
+            { to: '/school-staff/courses', label: 'NCAA Courses' },
           ],
-        },
+        }] : []),
       ]
     : [
         {
@@ -83,7 +110,7 @@ export default function Nav() {
                 </svg>
               </button>
             )}
-            <Link to={isStaff ? '/staff' : '/dashboard'}>
+            <Link to={isAdmin ? '/admin' : isSchoolStaff ? '/school-staff' : '/dashboard'}>
               <img src="/brand/bandb_logo1.png" alt="Ballers and Bookworms" className="h-8 w-auto" />
             </Link>
           </div>

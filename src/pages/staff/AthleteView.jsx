@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
 import Nav from '../../components/Nav'
-import StaffRoute from '../../components/StaffRoute'
+import AdminRoute from '../../components/AdminRoute'
 
 const BUDGET = 1000
 
@@ -59,7 +59,7 @@ function AthleteViewContent() {
       <div className="bg-black px-4 sm:px-6 py-8">
         <div className="max-w-4xl mx-auto">
           <div className="flex items-center gap-2 text-xs text-white/40 mb-2">
-            <Link to="/staff/athletes" className="hover:text-white transition-colors">All Athletes</Link>
+            <Link to="/admin/athletes" className="hover:text-white transition-colors">All Athletes</Link>
             <span>›</span>
             <span className="text-white/70">{athlete.name}</span>
           </div>
@@ -162,8 +162,8 @@ function AthleteViewContent() {
 
 export default function AthleteView() {
   return (
-    <StaffRoute>
+    <AdminRoute>
       <AthleteViewContent />
-    </StaffRoute>
+    </AdminRoute>
   )
 }

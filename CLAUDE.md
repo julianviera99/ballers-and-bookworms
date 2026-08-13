@@ -21,7 +21,7 @@ A private web app for Ballers and Bookworms student athletes with three core fea
 - **OpenAI text-embedding-3-small** — mentor and request embeddings for vector search
 - **pgvector** — cosine similarity search for mentor matching
 - **Cloudflare Pages** — frontend hosting
-- **Resend** — transactional email for mentor session notifications (optional)
+- **Resend** — transactional email for mentor session notifications only (optional; not used for invitations)
 
 ## Key Rules
 
@@ -73,17 +73,22 @@ All edge functions live in `supabase/functions/`. Each uses Deno and is deployed
 | `request-session` | POST from browser | Inserts `session_requests` row + sends Resend email to mentor | `RESEND_API_KEY` (optional), `FROM_EMAIL` (optional) |
 | `scrape-ncaa-courses` | POST from browser or internal | Establishes NCAA HS Portal session, searches by CEEB code (preferred) or name/state, parses approved course tables, caches 30 days in `ncaa_approved_courses_cache` | none |
 | `process-transcript` | POST from browser | Two-pass Claude pipeline: Pass 1 extracts school name + CEEB (256 tokens, temp=1); Pass 2 maps all courses at temp=0 with explicit grading scale rules, calculates GPA (excluding in-progress courses), checks DI/DII eligibility, saves to `eligibility_assessments` + `eligibility_courses` | `ANTHROPIC_API_KEY` |
+| `validate-invitation` | POST from browser (unauthenticated) | Checks that an invite token exists, is not expired/revoked/accepted; returns email + role | none |
+| `accept-invitation` | POST from browser (authenticated) | Verifies email match, creates `profiles` row, marks invitation accepted | none |
+
+Invitation flow: admin does a direct client-side insert into `invitations` (RLS allows admins FOR ALL). The resulting token is shown as a copyable link in the UI — no email is sent. The invitee opens the link, which hits `validate-invitation`, stores the token in localStorage, then triggers GitHub OAuth. On return, `accept-invitation` is called from `AuthContext` to create the profile row.
 
 Secrets are set in the Supabase dashboard → Edge Functions → Secrets. They are shared across all functions in the project.
 
 ## Database Schema
 
-All tables have RLS enabled. The `is_staff()` helper function (defined in `002_profile_and_staff.sql`) is used in RLS policies to grant staff full read/write access.
+All tables have RLS enabled. Helper functions `is_admin()`, `is_school_staff()`, `is_student()`, and `my_school_id()` are `SECURITY DEFINER STABLE` functions used in RLS policies.
 
 | Table | Purpose |
 |-------|---------|
+| `profiles` | One row per auth user; columns: `id`, `role` (user_role enum), `school_id` |
+| `invitations` | Invite tokens; columns: `token`, `email`, `role`, `school_id`, `expires_at`, `accepted_at`, `revoked_at` |
 | `student_athletes` | One row per athlete linked to `auth.users` |
-| `staff_users` | Email allowlist; `is_staff()` checks this table |
 | `funding_requests` | Fund requests with status: `pending`, `approved`, `reimbursed`, `denied`, `flagged` |
 | `mentors` | Mentor profiles; status `pending`/`active`/`inactive` — only `active` mentors appear in search |
 | `mentor_mentorship_areas` | Many-to-one with `mentors`; areas/topics a mentor covers |
