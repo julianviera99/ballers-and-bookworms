@@ -26,11 +26,13 @@ import MentorMatches      from './pages/staff/MentorMatches'
 import SchoolDatabase     from './pages/staff/SchoolDatabase'
 import SchoolEdit         from './pages/staff/SchoolEdit'
 import UserManagement     from './pages/staff/UserManagement'
+import UserProfile        from './pages/staff/UserProfile'
 import InviteUser         from './pages/staff/InviteUser'
 
 // School staff (SchoolStaffRoute inside each page)
-import SchoolStaffDashboard from './pages/school-staff/SchoolStaffDashboard'
-import StaffSchoolCourses    from './pages/school-staff/StaffSchoolCourses'
+import StaffAthletesList  from './pages/school-staff/StaffAthletesList'
+import StaffAthleteView   from './pages/school-staff/StaffAthleteView'
+import StaffSchoolCourses from './pages/school-staff/StaffSchoolCourses'
 
 function FeatureGate({ enabled, children }) {
   return enabled ? children : <Navigate to="/" replace />
@@ -66,14 +68,17 @@ export default function App() {
         <Route path="/admin/schools/:ceebCode"     element={<SchoolEdit />} />
         <Route path="/admin/users"                 element={<UserManagement />} />
         <Route path="/admin/users/invite"          element={<InviteUser />} />
+        <Route path="/admin/users/:id"             element={<UserProfile />} />
 
         {/* Legacy /staff/* redirects */}
         <Route path="/staff"                       element={<Navigate to="/admin" replace />} />
         <Route path="/staff/*"                     element={<Navigate to="/admin" replace />} />
 
         {/* School staff */}
-        <Route path="/school-staff"         element={<SchoolStaffDashboard />} />
-        <Route path="/school-staff/courses" element={<FeatureGate enabled={ENABLE_ELIGIBILITY}><StaffSchoolCourses /></FeatureGate>} />
+        <Route path="/school-staff"              element={<Navigate to="/school-staff/athletes" replace />} />
+        <Route path="/school-staff/athletes"     element={<StaffAthletesList />} />
+        <Route path="/school-staff/athletes/:id" element={<StaffAthleteView />} />
+        <Route path="/school-staff/courses"      element={<FeatureGate enabled={ENABLE_ELIGIBILITY}><StaffSchoolCourses /></FeatureGate>} />
       </Routes>
     </BrowserRouter>
   )

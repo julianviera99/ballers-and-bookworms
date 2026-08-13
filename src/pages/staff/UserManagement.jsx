@@ -195,13 +195,13 @@ function UserManagementContent() {
               <div className="divide-y divide-gray-50">
                 {profiles.map(p => (
                   <div key={p.id} className="flex items-center gap-4 px-5 py-3.5">
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-gray-900 truncate">{p.display_name}</p>
+                    <Link to={`/admin/users/${p.id}`} className="flex-1 min-w-0 group">
+                      <p className="text-sm font-semibold text-gray-900 truncate group-hover:text-brand-dark transition-colors">{p.display_name}</p>
                       <p className="text-xs text-gray-400 truncate">{p.email}</p>
                       {p.school_id && (
                         <p className="text-xs text-gray-500 mt-0.5">{schools[p.school_id] ?? p.school_id}</p>
                       )}
-                    </div>
+                    </Link>
                     <Badge role={p.role} />
                     <select
                       value={p.role}

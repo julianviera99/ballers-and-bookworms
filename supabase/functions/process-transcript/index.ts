@@ -625,6 +625,12 @@ Always respond with valid JSON only — no prose, no markdown fences.`
       core_course_gpa:          coreGpa,
       total_core_credits:       totalCoreCredits,
       pre_7th_semester_credits: pre7thCredits,
+      // Persist full DI/DII detail + 10/7 result so the assessment can be
+      // re-rendered later without recomputation.
+      di,
+      dii,
+      meets_10_7_rule:          meets10_7,
+      current_grade:            parsed.current_grade ?? null,
       assessment_date:          new Date().toISOString().split('T')[0],
     })
     .select('id')

@@ -10,7 +10,7 @@ export default function Nav() {
   const { pathname } = useLocation()
   const [open, setOpen] = useState(false)
 
-  const isHome = pathname === (isAdmin ? '/admin' : isSchoolStaff ? '/school-staff' : '/dashboard')
+  const isHome = pathname === (isAdmin ? '/admin' : isSchoolStaff ? '/school-staff/athletes' : '/dashboard')
 
   // Prefer GitHub username (@handle), fall back to email
   const githubUsername = session?.user?.user_metadata?.user_name
@@ -61,7 +61,7 @@ export default function Nav() {
         {
           label: null,
           links: [
-            { to: '/school-staff',          label: 'My Athletes' },
+            { to: '/school-staff/athletes',          label: 'My Athletes' },
           ],
         },
         ...(ENABLE_ELIGIBILITY ? [{
@@ -110,7 +110,7 @@ export default function Nav() {
                 </svg>
               </button>
             )}
-            <Link to={isAdmin ? '/admin' : isSchoolStaff ? '/school-staff' : '/dashboard'}>
+            <Link to={isAdmin ? '/admin' : isSchoolStaff ? '/school-staff/athletes' : '/dashboard'}>
               <img src="/brand/bandb_logo1.png" alt="Ballers and Bookworms" className="h-8 w-auto" />
             </Link>
           </div>
