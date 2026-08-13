@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
+import { fetchAssessments, loadFullAssessment } from '../lib/eligibility'
 import Nav from '../components/Nav'
 
 const SUPABASE_URL   = import.meta.env.VITE_SUPABASE_URL
@@ -89,6 +90,7 @@ function EligibilityContent() {
   const [loadingAthletes, setLoadingAthletes] = useState(false)
   const [history, setHistory]         = useState([])
   const [loadingHistory, setLoadingHistory] = useState(false)
+  const [viewingId, setViewingId]     = useState(null)   // id of the saved assessment currently shown
   const [error, setError]             = useState(null)
   const [progressMsg, setProgressMsg] = useState('')
   const [dragging, setDragging]       = useState(false)
@@ -116,21 +118,20 @@ function EligibilityContent() {
       // profile page via /eligibility?athlete=<id>.
       loadAthleteList().then(() => {
         const pre = searchParams.get('athlete')
-        if (pre) { setAthleteId(pre); loadHistory(pre) }
+        if (pre) { setAthleteId(pre); initAthlete(pre) }
       })
     }
   }, [authLoading, session, role]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadStudentAthlete() {
-    setLoadingHistory(true)
     const { data: athlete } = await supabase
       .from('student_athletes')
       .select('id')
       .eq('user_id', session.user.id)
       .maybeSingle()
-    if (!athlete) { setLoadingHistory(false); return }
+    if (!athlete) return
     setAthleteId(athlete.id)
-    await loadHistory(athlete.id)
+    await initAthlete(athlete.id)
   }
 
   async function loadAthleteList() {
@@ -142,16 +143,32 @@ function EligibilityContent() {
     setLoadingAthletes(false)
   }
 
-  async function loadHistory(id) {
+  // Load an athlete's saved assessments and open the most recent one so the
+  // full breakdown is shown immediately, with no upload required.
+  async function initAthlete(id) {
     setLoadingHistory(true)
-    const { data } = await supabase
-      .from('eligibility_assessments')
-      .select('id, assessment_date, high_school_name, high_school_state, overall_status, core_course_gpa, total_core_credits, created_at')
-      .eq('athlete_id', id)
-      .order('created_at', { ascending: false })
-      .limit(10)
-    setHistory(data ?? [])
+    const rows = await fetchAssessments(id)
+    setHistory(rows)
     setLoadingHistory(false)
+    if (rows.length > 0) {
+      await openAssessment(rows[0])
+    } else {
+      setViewingId(null); setResult(null); setPhase('idle')
+    }
+  }
+
+  // Refresh only the history list (after a new upload) without changing the view.
+  async function loadHistory(id) {
+    const rows = await fetchAssessments(id)
+    setHistory(rows)
+  }
+
+  // Load one saved assessment's full course breakdown into the results view.
+  async function openAssessment(row) {
+    const full = await loadFullAssessment(row)
+    setResult(full)
+    setViewingId(row.id)
+    setPhase('results')
   }
 
   // ── Rotate progress messages ────────────────────────────────────────────
@@ -254,6 +271,7 @@ function EligibilityContent() {
         setPhase('school_not_in_database')
       } else if (data.status === 'found') {
         setResult(data)
+        setViewingId(data.assessment_id)
         setPhase('results')
         refreshHistory()
       } else {
@@ -286,6 +304,7 @@ function EligibilityContent() {
     setPhase('idle'); setUploadedPath(null); setExtractedSchool({ name: '', state: '' })
     setEditSchool({ name: '', state: '' }); setEditingSchool(false); setSchoolNotInDb(null)
     setResult(null); setError(null); setExtractedCeebCode(null); setDivTab('di')
+    setViewingId(null)
   }
 
   // ── Derived result values ───────────────────────────────────────────────
@@ -316,6 +335,7 @@ function EligibilityContent() {
   // ── Render ────────────────────────────────────────────────────────────────
 
   const showHistory = !['uploading', 'extracting', 'processing'].includes(phase)
+  const viewingRow  = history.find(a => a.id === viewingId) ?? null
 
   return (
     <div className="min-h-screen bg-gray-100">
@@ -335,9 +355,9 @@ function EligibilityContent() {
           {phase === 'results' && (
             <button
               onClick={reset}
-              className="flex-shrink-0 text-xs font-bold bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-xl transition-colors uppercase tracking-wide"
+              className="flex-shrink-0 text-xs font-bold bg-brand hover:bg-brand-dark text-black px-4 py-2 rounded-xl transition-colors uppercase tracking-wide"
             >
-              New Check
+              Upload New Transcript
             </button>
           )}
         </div>
@@ -372,8 +392,8 @@ function EligibilityContent() {
                       const id = e.target.value || null
                       setAthleteId(id)
                       reset()
-                      if (id) loadHistory(id)
-                      else setHistory([])
+                      if (id) initAthlete(id)
+                      else { setHistory([]); setViewingId(null) }
                     }}
                     disabled={loadingAthletes}
                     className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm text-black bg-white focus:outline-none focus:ring-2 focus:ring-brand focus:border-transparent transition disabled:opacity-50"
@@ -588,6 +608,24 @@ function EligibilityContent() {
               </button>
             </div>
           </Card>
+        )}
+
+        {/* ── Last-updated bar ──────────────────────────────────────────── */}
+        {phase === 'results' && result && viewingRow && (
+          <div className="flex items-center justify-between gap-3 bg-white rounded-xl border border-gray-200 px-4 py-2.5 text-xs text-gray-500">
+            <span>
+              Last updated{' '}
+              <strong className="text-gray-700">
+                {new Date(viewingRow.assessment_date || viewingRow.created_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
+              </strong>
+            </span>
+            <button
+              onClick={reset}
+              className="font-bold text-brand hover:text-brand-dark uppercase tracking-wide whitespace-nowrap"
+            >
+              Upload New Transcript
+            </button>
+          </div>
         )}
 
         {/* ── Results dashboard ─────────────────────────────────────────── */}
@@ -1096,16 +1134,23 @@ function EligibilityContent() {
         {/* ── History ───────────────────────────────────────────────────── */}
         {showHistory && history.length > 0 && (
           <Card
-            title="Previous Assessments"
+            title="Assessment History"
             badge={<span className="text-xs text-white/50">{history.length} total</span>}
           >
             {/* Mobile: card list */}
             <div className="sm:hidden divide-y divide-gray-50">
               {history.map(a => (
-                <div key={a.id} className="px-5 py-3.5 space-y-1.5">
+                <button
+                  key={a.id}
+                  onClick={() => openAssessment(a)}
+                  className={`w-full text-left px-5 py-3.5 space-y-1.5 transition-colors ${a.id === viewingId ? 'bg-brand/10' : 'hover:bg-gray-50'}`}
+                >
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <p className="font-semibold text-black text-sm leading-tight">{a.high_school_name}</p>
+                      <p className="font-semibold text-black text-sm leading-tight">
+                        {a.high_school_name}
+                        {a.id === viewingId && <span className="ml-2 text-[9px] font-bold bg-brand text-black px-1.5 py-0.5 rounded uppercase tracking-wide">Viewing</span>}
+                      </p>
                       <p className="text-xs text-gray-400">{a.high_school_state} · {new Date(a.assessment_date || a.created_at).toLocaleDateString()}</p>
                     </div>
                     <StatusBadge status={a.overall_status} />
@@ -1114,7 +1159,7 @@ function EligibilityContent() {
                     <span>GPA <strong className="text-black">{Number(a.core_course_gpa).toFixed(3)}</strong></span>
                     <span>Credits <strong className="text-black">{Number(a.total_core_credits).toFixed(1)}</strong></span>
                   </div>
-                </div>
+                </button>
               ))}
             </div>
 
@@ -1132,12 +1177,17 @@ function EligibilityContent() {
                 </thead>
                 <tbody className="divide-y divide-gray-50">
                   {history.map(a => (
-                    <tr key={a.id} className="hover:bg-gray-50 transition-colors">
+                    <tr
+                      key={a.id}
+                      onClick={() => openAssessment(a)}
+                      className={`cursor-pointer transition-colors ${a.id === viewingId ? 'bg-brand/10' : 'hover:bg-gray-50'}`}
+                    >
                       <td className="px-5 py-3 text-gray-500 whitespace-nowrap">
                         {new Date(a.assessment_date || a.created_at).toLocaleDateString()}
                       </td>
                       <td className="px-5 py-3 font-semibold text-black">
                         {a.high_school_name} <span className="text-gray-400 font-normal">({a.high_school_state})</span>
+                        {a.id === viewingId && <span className="ml-2 text-[9px] font-bold bg-brand text-black px-1.5 py-0.5 rounded uppercase tracking-wide">Viewing</span>}
                       </td>
                       <td className="px-5 py-3 font-bold text-black whitespace-nowrap">{Number(a.core_course_gpa).toFixed(3)}</td>
                       <td className="px-5 py-3 text-gray-600 whitespace-nowrap">{Number(a.total_core_credits).toFixed(1)}</td>
@@ -1150,10 +1200,14 @@ function EligibilityContent() {
           </Card>
         )}
 
-        {/* Empty history state in idle — only when an athlete is selected (or for students with a profile row) */}
+        {/* Empty state — athlete selected but no assessment on file yet */}
         {phase === 'idle' && !loadingHistory && history.length === 0 && athleteId && (
-          <div className="text-center py-4 text-sm text-gray-400">
-            No previous assessments. Upload a transcript above to get started.
+          <div className="bg-white rounded-2xl border border-dashed border-gray-300 px-6 py-10 text-center">
+            <svg className="w-8 h-8 mx-auto text-gray-300 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            <p className="text-sm font-semibold text-gray-600">No transcript on file yet</p>
+            <p className="text-xs text-gray-400 mt-1">Upload a transcript above to generate an eligibility assessment.</p>
           </div>
         )}
 

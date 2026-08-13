@@ -4,7 +4,8 @@ import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../lib/AuthContext'
 import Nav from '../../components/Nav'
 import AdminRoute from '../../components/AdminRoute'
-import { AthleteDetailsCard, EligibilityHistoryCard, UploadTranscriptButton } from '../../components/athleteCards'
+import { AthleteDetailsCard } from '../../components/athleteCards'
+import AthleteAssessments from '../../components/AthleteAssessments'
 
 const ROLE_LABELS = { admin: 'Admin', school_staff: 'School Staff', student: 'Student' }
 const ROLE_COLORS = {
@@ -166,11 +167,8 @@ function UserProfileContent() {
         {user.role === 'student' && (
           athlete ? (
             <>
-              <div className="flex justify-end">
-                <UploadTranscriptButton athleteId={athlete.id} />
-              </div>
               <AthleteDetailsCard athlete={athlete} canEdit onSaved={setAthlete} />
-              <EligibilityHistoryCard athleteId={athlete.id} />
+              <AthleteAssessments athleteId={athlete.id} />
             </>
           ) : (
             <div className="bg-white rounded-2xl border border-gray-200 shadow-sm px-6 py-10 text-center text-sm text-gray-400">

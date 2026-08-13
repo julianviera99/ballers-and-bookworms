@@ -4,7 +4,8 @@ import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../lib/AuthContext'
 import Nav from '../../components/Nav'
 import SchoolStaffRoute from '../../components/SchoolStaffRoute'
-import { AthleteDetailsCard, EligibilityHistoryCard, UploadTranscriptButton } from '../../components/athleteCards'
+import { AthleteDetailsCard } from '../../components/athleteCards'
+import AthleteAssessments from '../../components/AthleteAssessments'
 
 function StaffAthleteViewContent() {
   const { id } = useParams()
@@ -62,11 +63,8 @@ function StaffAthleteViewContent() {
       </div>
 
       <main className="max-w-4xl mx-auto px-4 sm:px-6 py-8 space-y-6">
-        <div className="flex justify-end">
-          <UploadTranscriptButton athleteId={athlete.id} />
-        </div>
         <AthleteDetailsCard athlete={athlete} canEdit={false} />
-        <EligibilityHistoryCard athleteId={athlete.id} />
+        <AthleteAssessments athleteId={athlete.id} />
       </main>
     </div>
   )
