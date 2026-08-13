@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
 import Nav from '../components/Nav'
@@ -73,6 +73,7 @@ function Card({ title, badge, children, className = '' }) {
 function EligibilityContent() {
   const { session, role, isAdmin, isSchoolStaff, isStudent, schoolId, loading: authLoading } = useAuth()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
 
   // Phase: idle | uploading | extracting | confirming | processing | school_not_in_database | results
   const [phase, setPhase]             = useState('idle')
@@ -111,7 +112,12 @@ function EligibilityContent() {
     if (isStudent) {
       loadStudentAthlete()
     } else {
-      loadAthleteList()
+      // Admin/staff: load the athlete list, then preselect if arriving from a
+      // profile page via /eligibility?athlete=<id>.
+      loadAthleteList().then(() => {
+        const pre = searchParams.get('athlete')
+        if (pre) { setAthleteId(pre); loadHistory(pre) }
+      })
     }
   }, [authLoading, session, role]) // eslint-disable-line react-hooks/exhaustive-deps
 
