@@ -64,6 +64,12 @@ export default function Nav() {
             { to: '/school-staff',          label: 'My Athletes' },
           ],
         },
+        ...(ENABLE_ELIGIBILITY ? [{
+          label: 'Eligibility',
+          links: [
+            { to: '/school-staff/courses', label: 'NCAA Courses' },
+          ],
+        }] : []),
       ]
     : [
         {

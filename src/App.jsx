@@ -30,6 +30,7 @@ import InviteUser         from './pages/staff/InviteUser'
 
 // School staff (SchoolStaffRoute inside each page)
 import SchoolStaffDashboard from './pages/school-staff/SchoolStaffDashboard'
+import StaffSchoolCourses    from './pages/school-staff/StaffSchoolCourses'
 
 function FeatureGate({ enabled, children }) {
   return enabled ? children : <Navigate to="/" replace />
@@ -71,7 +72,8 @@ export default function App() {
         <Route path="/staff/*"                     element={<Navigate to="/admin" replace />} />
 
         {/* School staff */}
-        <Route path="/school-staff"  element={<SchoolStaffDashboard />} />
+        <Route path="/school-staff"         element={<SchoolStaffDashboard />} />
+        <Route path="/school-staff/courses" element={<FeatureGate enabled={ENABLE_ELIGIBILITY}><StaffSchoolCourses /></FeatureGate>} />
       </Routes>
     </BrowserRouter>
   )

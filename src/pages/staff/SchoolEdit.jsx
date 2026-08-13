@@ -23,8 +23,12 @@ function Spinner({ className = 'w-5 h-5' }) {
   )
 }
 
-function SchoolEditContent() {
-  const { ceebCode } = useParams()
+export function SchoolEditContent({
+  ceebCode,
+  backHref     = '/admin/schools',
+  backLabel    = 'School Database',
+  notFoundMessage,
+}) {
   const navigate     = useNavigate()
   const { session }  = useAuth()
 
@@ -43,7 +47,7 @@ function SchoolEditContent() {
       const { data } = await supabase
         .from('ncaa_schools')
         .select('*')
-        .eq('ceeb_code', decodeURIComponent(ceebCode))
+        .eq('ceeb_code', ceebCode)
         .maybeSingle()
       if (!data) { setLoading(false); return }
       setSchool(data)
@@ -83,7 +87,7 @@ function SchoolEditContent() {
         edited_by:        session.user.id,
         edited_at:        new Date().toISOString(),
       })
-      .eq('ceeb_code', decodeURIComponent(ceebCode))
+      .eq('ceeb_code', ceebCode)
     if (error) {
       setSaveMsg({ type: 'error', text: `Save failed: ${error.message}` })
     } else {
@@ -105,7 +109,8 @@ function SchoolEditContent() {
       <div className="min-h-screen bg-gray-100">
         <Nav />
         <div className="max-w-4xl mx-auto px-4 py-12 text-center text-gray-500">
-          School not found. <button onClick={() => navigate('/admin/schools')} className="text-brand underline">Back to School Database</button>
+          {notFoundMessage ?? 'School not found.'}{' '}
+          <button onClick={() => navigate(backHref)} className="text-brand underline">Back to {backLabel}</button>
         </div>
       </div>
     )
@@ -118,11 +123,11 @@ function SchoolEditContent() {
       <div className="bg-black px-4 sm:px-6 py-8">
         <div className="max-w-4xl mx-auto">
           <button
-            onClick={() => navigate('/admin/schools')}
+            onClick={() => navigate(backHref)}
             className="text-xs text-white/50 hover:text-white/80 transition-colors mb-2 flex items-center gap-1"
           >
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" /></svg>
-            School Database
+            {backLabel}
           </button>
           <h1 className="text-2xl font-bold text-white uppercase tracking-wide">{school.school_name}</h1>
           <p className="text-white/50 text-sm mt-0.5">
@@ -262,7 +267,7 @@ function SchoolEditContent() {
             {saving ? <><Spinner className="w-4 h-4" /> Saving…</> : 'Save Changes'}
           </button>
           <button
-            onClick={() => navigate('/admin/schools')}
+            onClick={() => navigate(backHref)}
             className="px-6 py-3 text-sm font-bold text-gray-500 hover:text-gray-800 border border-gray-200 rounded-xl transition-colors"
           >
             Back
@@ -275,9 +280,10 @@ function SchoolEditContent() {
 }
 
 export default function SchoolEdit() {
+  const { ceebCode } = useParams()
   return (
     <AdminRoute>
-      <SchoolEditContent />
+      <SchoolEditContent ceebCode={decodeURIComponent(ceebCode)} />
     </AdminRoute>
   )
 }

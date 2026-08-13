@@ -30,6 +30,7 @@ function SchoolDatabaseContent() {
   const [addingLoading, setAddingLoading] = useState(false)
   const [addSuccess, setAddSuccess]   = useState(false)
   const [refreshingCode, setRefreshingCode] = useState(null)  // ceeb_code being refreshed
+  const [deletingCode, setDeletingCode]     = useState(null)  // ceeb_code being deleted
 
   useEffect(() => { loadSchools() }, [])
 
@@ -151,6 +152,22 @@ function SchoolDatabaseContent() {
     } finally {
       setRefreshingCode(null)
     }
+  }
+
+  async function handleDelete(school) {
+    const ok = window.confirm(
+      `Remove ${school.school_name} (CEEB ${school.ceeb_code}) from the database? ` +
+      `This deletes its approved course list. Athletes' saved assessments are not affected.`
+    )
+    if (!ok) return
+    setDeletingCode(school.ceeb_code)
+    const { error } = await supabase
+      .from('ncaa_schools')
+      .delete()
+      .eq('ceeb_code', school.ceeb_code)
+    if (error) alert(`Failed to delete: ${error.message}`)
+    else await loadSchools()
+    setDeletingCode(null)
   }
 
   return (
@@ -332,6 +349,13 @@ function SchoolDatabaseContent() {
                             >
                               Edit
                             </Link>
+                            <button
+                              onClick={() => handleDelete(s)}
+                              disabled={deletingCode === s.ceeb_code}
+                              className="text-xs font-semibold text-gray-400 hover:text-red-500 disabled:opacity-40 transition-colors"
+                            >
+                              {deletingCode === s.ceeb_code ? 'Removing…' : 'Remove'}
+                            </button>
                           </div>
                         </td>
                       </tr>
@@ -374,6 +398,13 @@ function SchoolDatabaseContent() {
                         >
                           Edit
                         </Link>
+                        <button
+                          onClick={() => handleDelete(s)}
+                          disabled={deletingCode === s.ceeb_code}
+                          className="text-xs font-semibold text-gray-400 hover:text-red-500 disabled:opacity-40 transition-colors"
+                        >
+                          {deletingCode === s.ceeb_code ? 'Removing…' : 'Remove'}
+                        </button>
                       </div>
                     </div>
                   </div>
