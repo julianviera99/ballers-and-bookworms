@@ -8,8 +8,8 @@ export default function AdminRoute({ children }) {
 
   useEffect(() => {
     if (loading) return
-    if (!session) { navigate('/', { replace: true }); return }
-    if (!isAdmin)  { navigate('/no-access', { replace: true }); return }
+    if (!session) { navigate('/admin/login', { replace: true }); return }
+    if (!isAdmin)  { navigate('/admin/login', { replace: true }); return }
   }, [loading, session, isAdmin, navigate])
 
   if (loading || !isAdmin) return null
