@@ -1,32 +1,40 @@
 /**
  * process-transcript — Supabase Edge Function
  *
- * Processes a student transcript (PDF or image) stored in Supabase Storage.
- * Extracts the school name directly from the transcript, looks up that school's
- * actual NCAA-approved course list, then maps every course against it.
+ * Public, unauthenticated. Processes a transcript (PDF or image) sent inline
+ * as base64 in the request body — never written to Storage, never persisted
+ * anywhere. Extracts the school name, looks up (or scrapes + caches) that
+ * school's NCAA-approved course list, maps every course against it, and
+ * returns the full DI/DII eligibility assessment directly in the response.
  *
  * Request body:
  *   {
- *     athlete_id:       string  — UUID of the student_athletes row
- *     storage_path:     string  — path in Supabase Storage (e.g. "transcripts/abc.pdf")
- *     storage_bucket:   string  — bucket name (e.g. "transcripts")
- *     ncaa_school_code?: string — optional; provide when resolving a prior
- *                                 needs_school_selection response to skip the
- *                                 school search and go straight to course lookup
+ *     file_base64:  string  — base64-encoded transcript file (no data: prefix)
+ *     media_type:   string  — 'application/pdf' | 'image/png' | 'image/jpeg'
+ *     extract_only?: boolean — first call: just identify the school, skip mapping
+ *     school_name?:  string  — second call: school confirmed/edited by the visitor
+ *     school_state?: string
+ *     ceeb_code?:    string
  *   }
  *
  * Response shapes:
- *   // Normal success
- *   { status: 'found', assessment_id, high_school_name, high_school_state,
- *     ncaa_school_code, current_grade, courses, core_course_gpa,
- *     total_core_credits, pre_7th_semester_credits, di, dii, overall_status }
+ *   // Pass 1 (extract_only)
+ *   { status: 'school_extracted', high_school_name, high_school_state, ceeb_code }
  *
- *   // School has not been added to the ncaa_schools database yet
- *   { status: 'school_not_in_database', school_name, state, ceeb_code }
+ *   // Pass 2 success
+ *   { status: 'found', high_school_name, high_school_state, ncaa_school_code,
+ *     current_grade, courses, core_course_gpa, total_core_credits,
+ *     pre_7th_semester_credits, di, dii, overall_status }
+ *
+ *   // Pass 2 — school not in our database AND the NCAA portal has nothing
+ *   // for it either. No fallback to general knowledge, no partial results.
+ *   { status: 'school_not_found', message }
  *
  * Two-pass Claude flow:
- *   Pass 1 (cheap): extract high_school_name + high_school_state from the image/PDF
- *   → look up ncaa_schools table by ceeb_code or name+state
+ *   Pass 1 (cheap): extract high_school_name + high_school_state + ceeb_code
+ *   → look up ncaa_schools by ceeb_code or name+state; on a miss, scrape the
+ *     NCAA portal (server-to-server call to scrape-ncaa-courses) and cache
+ *     the result under ncaa_schools for every future visitor from that school
  *   Pass 2 (full):  extract all courses + map against the school's approved list
  *
  * NCAA DI requirements (16 core courses):
@@ -57,6 +65,12 @@ const CLAUDE_MODEL         = 'claude-haiku-4-5-20251001'
 const CLAUDE_TIMEOUT_QUICK = 20_000   // 20s for the school-name extraction pass
 const CLAUDE_TIMEOUT_FULL  = 60_000   // 60s for the full extraction + mapping pass
 const ANTHROPIC_API        = 'https://api.anthropic.com/v1/messages'
+
+const SCHOOL_NOT_FOUND_MESSAGE =
+  "We were unable to find your school's approved course list in the NCAA database. " +
+  'Without your school\'s specific course list we cannot provide an accurate eligibility ' +
+  "assessment. Please verify your school's CEEB code and try again, or contact Ballers & " +
+  'Bookworms for assistance.'
 
 // NCAA core-course GPA scale — simple 5-level, no +/- variants
 const GRADE_POINTS: Record<string, number> = { A: 4, B: 3, C: 2, D: 1, F: 0 }
@@ -126,23 +140,13 @@ Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS })
   if (req.method !== 'POST')    return json({ error: 'Method not allowed' }, 405)
 
-  // ── Auth ───────────────────────────────────────────────────────────────
-
-  const authHeader = req.headers.get('Authorization')
-  if (!authHeader) return json({ error: 'Missing Authorization header' }, 401)
-
   const SUPABASE_URL              = Deno.env.get('SUPABASE_URL')!
   const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
   const SUPABASE_ANON_KEY         = Deno.env.get('SUPABASE_ANON_KEY')!
   const ANTHROPIC_API_KEY         = Deno.env.get('ANTHROPIC_API_KEY')!
+  const INTERNAL_FN_SECRET        = Deno.env.get('INTERNAL_FN_SECRET')!
 
   if (!ANTHROPIC_API_KEY) return json({ error: 'ANTHROPIC_API_KEY not configured' }, 500)
-
-  const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-    global: { headers: { Authorization: authHeader } },
-  })
-  const { data: { user }, error: authErr } = await userClient.auth.getUser()
-  if (authErr || !user) return json({ error: 'Unauthorized' }, 401)
 
   const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
     auth: { autoRefreshToken: false, persistSession: false },
@@ -150,73 +154,23 @@ Deno.serve(async (req: Request) => {
 
   // ── Parse body ─────────────────────────────────────────────────────────
 
-  // Use Record<string, unknown> so booleans (e.g. extract_only: true) are
-  // preserved with the correct runtime type instead of being coerced to string.
   let body: Record<string, unknown>
   try { body = await req.json() } catch { return json({ error: 'Invalid JSON body' }, 400) }
 
-  const athlete_id       = body.athlete_id       as string | undefined
-  const storage_path     = body.storage_path     as string | undefined
-  const storage_bucket   = body.storage_bucket   as string | undefined
+  const fileBase64       = body.file_base64      as string | undefined
+  const mediaTypeInput   = body.media_type       as string | undefined
   const extract_only     = body.extract_only                            // boolean | string | undefined
   const providedSchoolName  = body.school_name   as string | undefined
   const providedSchoolState = body.school_state  as string | undefined
   const providedCeebCode    = body.ceeb_code     as string | undefined
 
-  if (!athlete_id)     return json({ error: 'athlete_id is required' }, 400)
-  if (!storage_path)   return json({ error: 'storage_path is required' }, 400)
-  if (!storage_bucket) return json({ error: 'storage_bucket is required' }, 400)
+  if (!fileBase64)     return json({ error: 'file_base64 is required' }, 400)
+  if (!mediaTypeInput) return json({ error: 'media_type is required' }, 400)
 
-  console.log(`[process-transcript] athlete=${athlete_id} path=${storage_path}`)
+  const mediaType = mediaTypeInput
+  const isPdf      = mediaType === 'application/pdf'
 
-  // Verify the caller is the athlete OR a school_staff member for the same school
-  const { data: athlete } = await admin
-    .from('student_athletes')
-    .select('id, user_id, school_ceeb_code')
-    .eq('id', athlete_id)
-    .maybeSingle()
-
-  if (!athlete) return json({ error: 'athlete_id not found' }, 403)
-
-  const isOwner = athlete.user_id === user.id
-  if (!isOwner) {
-    const { data: callerProfile } = await admin
-      .from('profiles')
-      .select('role, school_id')
-      .eq('id', user.id)
-      .maybeSingle()
-
-    const isAdmin       = callerProfile?.role === 'admin'
-    const isSchoolStaff =
-      callerProfile?.role === 'school_staff' &&
-      callerProfile.school_id &&
-      callerProfile.school_id === athlete.school_ceeb_code
-
-    if (!isAdmin && !isSchoolStaff) {
-      return json({ error: 'Not authorized to process this athlete\'s transcript' }, 403)
-    }
-  }
-
-  // ── Download transcript from Storage ───────────────────────────────────
-
-  const { data: fileData, error: dlErr } = await admin.storage
-    .from(storage_bucket)
-    .download(storage_path)
-
-  if (dlErr || !fileData) {
-    console.error(`[process-transcript] storage download failed: ${dlErr?.message}`)
-    return json({ error: `Failed to download transcript: ${dlErr?.message}` }, 500)
-  }
-
-  const fileBytes  = await fileData.arrayBuffer()
-  const base64File = uint8ArrayToBase64(new Uint8Array(fileBytes))
-  const lowerPath  = storage_path.toLowerCase()
-  const isPdf      = lowerPath.endsWith('.pdf')
-  const mediaType  = isPdf
-    ? 'application/pdf'
-    : lowerPath.endsWith('.png') ? 'image/png' : 'image/jpeg'
-
-  console.log(`[process-transcript] downloaded ${fileBytes.byteLength} bytes, type=${mediaType}`)
+  console.log(`[process-transcript] received file, media_type=${mediaType}, base64_len=${fileBase64.length}`)
 
   // ── Pass 1: Extract school name + state from transcript ────────────────
   // Quick Claude call — only asks for the school header info, not courses.
@@ -224,8 +178,8 @@ Deno.serve(async (req: Request) => {
   // (after the UI confirmation step).
 
   const contentBlock = isPdf
-    ? { type: 'document', source: { type: 'base64', media_type: mediaType, data: base64File } }
-    : { type: 'image',    source: { type: 'base64', media_type: mediaType, data: base64File } }
+    ? { type: 'document', source: { type: 'base64', media_type: mediaType, data: fileBase64 } }
+    : { type: 'image',    source: { type: 'base64', media_type: mediaType, data: fileBase64 } }
 
   let extractedSchoolName: string
   let extractedSchoolState: string
@@ -277,7 +231,9 @@ Deno.serve(async (req: Request) => {
 
   // ── Look up school in ncaa_schools database ────────────────────────────
   // Prefer CEEB code (globally unique); fall back to name+state match.
-  // If not found, return early — staff must add the school before processing.
+  // On a miss, scrape the NCAA portal directly and cache the result for
+  // every future visitor from that school. No fallback to Claude's general
+  // knowledge — if the portal has nothing either, we stop here.
 
   let approvedCourses: ApprovedCourse[] = []
   let resolvedSchoolCode: string | null = null
@@ -312,48 +268,57 @@ Deno.serve(async (req: Request) => {
       schoolRow = data as SchoolRow | null
     }
 
-    if (!schoolRow) {
-      console.warn(`[process-transcript] school not in ncaa_schools database`)
-      return json({
-        status:      'school_not_in_database',
-        school_name: extractedSchoolName,
-        state:       extractedSchoolState,
-        ceeb_code:   extractedCeebCode ?? null,
+    if (schoolRow) {
+      approvedCourses    = (schoolRow.approved_courses ?? []) as ApprovedCourse[]
+      resolvedSchoolCode = schoolRow.ceeb_code
+      resolvedSchoolName = schoolRow.school_name
+      resolvedSchoolState= schoolRow.state
+      gradingScale       = (schoolRow.grading_scale ?? null) as GradingScale | null
+      console.log(`[process-transcript] found in DB: "${resolvedSchoolName}" ceeb=${resolvedSchoolCode}, ${approvedCourses.length} approved courses, grading_scale=${gradingScale ? JSON.stringify(gradingScale) : 'standard'}`)
+    } else {
+      console.warn('[process-transcript] school not cached — scraping NCAA portal...')
+      const scraped = await scrapeSchool(SUPABASE_URL, SUPABASE_ANON_KEY, INTERNAL_FN_SECRET, {
+        high_school_name: extractedSchoolName,
+        state:             extractedSchoolState,
+        ceeb_code:         extractedCeebCode ?? undefined,
       })
-    }
 
-    approvedCourses    = (schoolRow.approved_courses ?? []) as ApprovedCourse[]
-    resolvedSchoolCode = schoolRow.ceeb_code
-    resolvedSchoolName = schoolRow.school_name
-    resolvedSchoolState= schoolRow.state
-    gradingScale       = (schoolRow.grading_scale ?? null) as GradingScale | null
-    console.log(`[process-transcript] found in DB: "${resolvedSchoolName}" ceeb=${resolvedSchoolCode}, ${approvedCourses.length} approved courses, grading_scale=${gradingScale ? JSON.stringify(gradingScale) : 'standard'}`)
+      if (!scraped || scraped.status !== 'found') {
+        console.warn(`[process-transcript] scrape did not resolve a single school (status=${scraped?.status ?? 'error'})`)
+        return json({ status: 'school_not_found', message: SCHOOL_NOT_FOUND_MESSAGE })
+      }
+
+      approvedCourses     = (scraped.courses ?? []) as ApprovedCourse[]
+      gradingScale        = (scraped.grading_scale ?? null) as GradingScale | null
+      resolvedSchoolName  = scraped.school_name || extractedSchoolName
+      resolvedSchoolState = scraped.state || extractedSchoolState
+      resolvedSchoolCode  = extractedCeebCode
+
+      console.log(`[process-transcript] scraped fresh: "${resolvedSchoolName}", ${approvedCourses.length} approved courses`)
+
+      // Cache it for future visitors — only possible if we have a CEEB code
+      // to key the row on (ncaa_schools.ceeb_code is the primary key).
+      if (extractedCeebCode) {
+        const { error: upsertErr } = await admin.from('ncaa_schools').upsert({
+          ceeb_code:        extractedCeebCode,
+          ncaa_portal_code: scraped.ncaa_school_code ?? null,
+          school_name:      resolvedSchoolName,
+          state:            resolvedSchoolState,
+          approved_courses: approvedCourses,
+          grading_scale:    gradingScale,
+          last_scraped_at:  new Date().toISOString(),
+        })
+        if (upsertErr) console.error(`[process-transcript] failed to cache scraped school: ${upsertErr.message}`)
+        else console.log(`[process-transcript] cached "${resolvedSchoolName}" (ceeb=${extractedCeebCode}) in ncaa_schools`)
+      } else {
+        console.warn('[process-transcript] no CEEB code available — using scraped data for this request only, not caching')
+      }
+    }
   }
 
   // ── Pass 2: Full extraction + course mapping ────────────────────────────
 
-  // ── DIAG: raw text dump — tells us if Claude can read the image at all ──
-  console.log('[DIAG] requesting raw text transcription of transcript...')
-  try {
-    const rawText = await claudeCall(
-      ANTHROPIC_API_KEY,
-      CLAUDE_TIMEOUT_QUICK,
-      'You are reading a document. Transcribe ALL visible text exactly as it appears — every word, number, label, and section header. Do not interpret or summarize. Preserve the layout as closely as possible.',
-      [contentBlock, { type: 'text', text: 'Transcribe every piece of text visible in this document exactly as shown.' }],
-      2048,
-    )
-    console.log('[DIAG] raw transcript text:')
-    console.log(rawText)
-  } catch (e) {
-    console.warn(`[DIAG] raw text extraction failed: ${(e as Error).message}`)
-  }
-
-  // ── DIAG: approved course list ────────────────────────────────────────
-  console.log(`[DIAG] approved_list_available=${approvedCourses.length > 0} count=${approvedCourses.length}`)
-  if (approvedCourses.length > 0) {
-    console.log('[DIAG] approved courses loaded:')
-    approvedCourses.forEach((c, i) => console.log(`  [DIAG]  ${i + 1}. ${c.course_name} (${c.category})`))
-  }
+  console.log(`[process-transcript] approved_list_available=${approvedCourses.length > 0} count=${approvedCourses.length}`)
 
   const systemPrompt = `You are reading a high school transcript. Extract raw course data exactly as printed.
 
@@ -401,9 +366,6 @@ Always respond with valid JSON only — no prose, no markdown fences.`
       0,
     )
     console.log(`[process-transcript] Pass 2 response: ${claudeResponse.length} chars`)
-    // ── DIAG: raw Claude response ────────────────────────────────────────
-    console.log('[DIAG] raw Claude Pass 2 response:')
-    console.log(claudeResponse)
   } catch (e) {
     const msg = (e as Error).message
     console.error(`[process-transcript] Pass 2 failed: ${msg}`)
@@ -428,12 +390,6 @@ Always respond with valid JSON only — no prose, no markdown fences.`
     console.error(`[process-transcript] Raw: ${claudeResponse}`)
     return json({ error: 'Failed to parse transcript analysis response' }, 500)
   }
-
-  // ── DIAG: raw courses Claude extracted ───────────────────────────────────
-  console.log(`[DIAG] Claude extracted ${parsed.courses.length} courses (credit_scale=${parsed.credit_scale ?? 'carnegie'}):`)
-  parsed.courses.forEach((c, i) => {
-    console.log(`  [DIAG]  ${i + 1}. "${c.course_name}" | raw_grade="${c.raw_grade}" | raw_credit=${c.raw_credit} | semester=${c.semester}`)
-  })
 
   // ── Code-based approved list matching + grade conversion + GPA ────────────
   // Deterministic: no Claude involvement in any of these calculations.
@@ -513,8 +469,6 @@ Always respond with valid JSON only — no prose, no markdown fences.`
     const quality_points = is_approved && gradeVal !== null
       ? parseFloat((credit * gradeVal).toFixed(2))
       : 0
-
-    console.log(`  [process-transcript] "${c.course_name}" grade="${grade}" credit=${credit} tier=${t12 ? t12.tier : (t3 ? 3 : '-')} cat="${mapped_category}" qp=${quality_points}`)
 
     return {
       course_name:     c.course_name,
@@ -609,68 +563,15 @@ Always respond with valid JSON only — no prose, no markdown fences.`
     : diEligible || diiEligible ? 'at_risk'
     : 'needs_attention'
 
-  // ── Save assessment ────────────────────────────────────────────────────
+  // ── Log anonymous usage — no personal data, just a timestamp ───────────
 
-  const transcript_url = `${SUPABASE_URL}/storage/v1/object/${storage_bucket}/${storage_path}`
-
-  const { data: assessment, error: assessErr } = await admin
-    .from('eligibility_assessments')
-    .insert({
-      athlete_id,
-      transcript_url,
-      high_school_name:         parsed.high_school_name || resolvedSchoolName,
-      high_school_state:        parsed.high_school_state || resolvedSchoolState,
-      ncaa_school_code:         resolvedSchoolCode,
-      overall_status,
-      core_course_gpa:          coreGpa,
-      total_core_credits:       totalCoreCredits,
-      pre_7th_semester_credits: pre7thCredits,
-      // Persist full DI/DII detail + 10/7 result so the assessment can be
-      // re-rendered later without recomputation.
-      di,
-      dii,
-      meets_10_7_rule:          meets10_7,
-      current_grade:            parsed.current_grade ?? null,
-      assessment_date:          new Date().toISOString().split('T')[0],
-    })
-    .select('id')
-    .single()
-
-  if (assessErr || !assessment) {
-    console.error(`[process-transcript] assessment insert failed: ${assessErr?.message}`)
-    return json({ error: `Failed to save assessment: ${assessErr?.message}` }, 500)
-  }
-
-  console.log(`[process-transcript] saved assessment ${assessment.id}`)
-
-  if (extractedCourses.length > 0) {
-    const { error: coursesErr } = await admin
-      .from('eligibility_courses')
-      .insert(extractedCourses.map(c => ({
-        assessment_id:   assessment.id,
-        course_name:     c.course_name,
-        mapped_category: c.mapped_category,
-        credit:          c.credit,
-        grade:           c.grade,
-        quality_points:  c.quality_points,
-        is_approved:     c.is_approved,
-        confidence:      c.confidence,
-        needs_review:    c.needs_review,
-        semester:        c.semester ?? null,
-      })))
-
-    if (coursesErr) {
-      console.error(`[process-transcript] courses insert failed: ${coursesErr.message}`)
-    } else {
-      console.log(`[process-transcript] saved ${extractedCourses.length} courses`)
-    }
-  }
+  const { error: usageErr } = await admin.from('eligibility_checks').insert({})
+  if (usageErr) console.error(`[process-transcript] usage log insert failed: ${usageErr.message}`)
 
   // ── Return result ──────────────────────────────────────────────────────
 
   return json({
     status:                   'found',
-    assessment_id:            assessment.id,
     high_school_name:         parsed.high_school_name || resolvedSchoolName,
     high_school_state:        parsed.high_school_state || resolvedSchoolState,
     ncaa_school_code:         resolvedSchoolCode,
@@ -685,6 +586,43 @@ Always respond with valid JSON only — no prose, no markdown fences.`
     overall_status,
   })
 })
+
+// ── Internal scrape call ──────────────────────────────────────────────────────
+
+/**
+ * Calls scrape-ncaa-courses server-to-server. The Supabase gateway requires
+ * a real JWT on Authorization for any function call, so that carries the
+ * anon key as usual; the shared internal secret travels as a custom header
+ * and is what scrape-ncaa-courses actually checks to identify this as an
+ * internal call (vs. requiring an admin user JWT).
+ */
+async function scrapeSchool(
+  supabaseUrl:        string,
+  anonKey:            string,
+  internalFnSecret:   string,
+  params: { high_school_name: string; state: string; ceeb_code?: string },
+): Promise<Record<string, unknown> | null> {
+  try {
+    const res = await fetch(`${supabaseUrl}/functions/v1/scrape-ncaa-courses`, {
+      method:  'POST',
+      headers: {
+        'Authorization':      `Bearer ${anonKey}`,
+        'apikey':              anonKey,
+        'x-internal-secret':   internalFnSecret,
+        'Content-Type':        'application/json',
+      },
+      body: JSON.stringify(params),
+    })
+    if (!res.ok) {
+      console.error(`[process-transcript] scrape-ncaa-courses returned ${res.status}`)
+      return null
+    }
+    return await res.json()
+  } catch (e) {
+    console.error(`[process-transcript] scrape-ncaa-courses call failed: ${(e as Error).message}`)
+    return null
+  }
+}
 
 // ── Course-matching helpers ────────────────────────────────────────────────
 
@@ -938,20 +876,6 @@ async function claudeCall(
 }
 
 // ── Utility ───────────────────────────────────────────────────────────────────
-
-/**
- * Converts a Uint8Array to a base64 string in chunks to avoid
- * "Maximum call stack size exceeded" when spreading large arrays
- * as arguments to String.fromCharCode.
- */
-function uint8ArrayToBase64(bytes: Uint8Array): string {
-  let binary = ''
-  const chunkSize = 8192
-  for (let i = 0; i < bytes.length; i += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(i, Math.min(i + chunkSize, bytes.length)))
-  }
-  return btoa(binary)
-}
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {

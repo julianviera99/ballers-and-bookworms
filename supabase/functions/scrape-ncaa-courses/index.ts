@@ -3,7 +3,13 @@
  *
  * Pure HTTP scraper: fetches a school's NCAA-approved course list and grading
  * scale from the NCAA HS Portal. All DB persistence is handled by the caller
- * (staff UI writes results to ncaa_schools; transcript processing reads from there).
+ * (admin UI writes results to ncaa_schools; process-transcript caches on a
+ * cache-miss during the public eligibility flow).
+ *
+ * Auth: accepts either the service-role key as a bearer token (internal
+ * server-to-server call from process-transcript) or an authenticated admin
+ * user JWT (the admin UI's manual add-school / refresh actions). Rejects
+ * everything else — not callable directly from an unauthenticated browser.
  *
  * Request body:
  *   { high_school_name: string, state: string, ncaa_school_code?: string, ceeb_code?: string }
@@ -97,18 +103,41 @@ Deno.serve(async (req: Request) => {
   if (req.method !== 'POST')    return json({ error: 'Method not allowed' }, 405)
 
   // ── Auth ───────────────────────────────────────────────────────────────
+  // Two legitimate callers: process-transcript calling internally (server-to-
+  // server, identified by a dedicated shared secret sent as a custom header —
+  // the gateway itself requires a real JWT on Authorization, so the internal
+  // secret can't travel there), or an admin signed in to the admin UI (add
+  // school / refresh course list). Everyone else is rejected — this function
+  // is not meant to be called from the browser by an unauthenticated visitor.
 
-  const authHeader = req.headers.get('Authorization')
-  if (!authHeader) return json({ error: 'Missing Authorization header' }, 401)
+  const SUPABASE_URL              = Deno.env.get('SUPABASE_URL')!
+  const SUPABASE_ANON_KEY         = Deno.env.get('SUPABASE_ANON_KEY')!
+  const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+  const INTERNAL_FN_SECRET        = Deno.env.get('INTERNAL_FN_SECRET')!
 
-  const SUPABASE_URL      = Deno.env.get('SUPABASE_URL')!
-  const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')!
+  const internalSecretHeader = req.headers.get('x-internal-secret')
+  const isInternalCall = !!INTERNAL_FN_SECRET && internalSecretHeader === INTERNAL_FN_SECRET
 
-  const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-    global: { headers: { Authorization: authHeader } },
-  })
-  const { data: { user }, error: authErr } = await userClient.auth.getUser()
-  if (authErr || !user) return json({ error: 'Unauthorized' }, 401)
+  if (!isInternalCall) {
+    const authHeader = req.headers.get('Authorization')
+    if (!authHeader) return json({ error: 'Missing Authorization header' }, 401)
+
+    const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      global: { headers: { Authorization: authHeader } },
+    })
+    const { data: { user }, error: authErr } = await userClient.auth.getUser()
+    if (authErr || !user) return json({ error: 'Unauthorized' }, 401)
+
+    const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    })
+    const { data: adminRow } = await admin
+      .from('admins')
+      .select('id')
+      .eq('id', user.id)
+      .maybeSingle()
+    if (!adminRow) return json({ error: 'Admin access required' }, 403)
+  }
 
   // ── Parse body ─────────────────────────────────────────────────────────
 
